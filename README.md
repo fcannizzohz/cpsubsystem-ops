@@ -1,6 +1,6 @@
 # Hazelcast CP Subsystem — Ops & Monitoring
 
-A self-contained Docker Compose environment for running, load-testing, and monitoring the Hazelcast CP Subsystem. The stack includes a 5-node Hazelcast Enterprise cluster, Management Center, Prometheus, and Grafana with two purpose-built dashboards.
+A self-contained Docker Compose environment for running, load-testing, and monitoring the Hazelcast CP Subsystem. The stack includes a 5-node Hazelcast Enterprise cluster, Management Center, Prometheus, and Grafana with six purpose-built dashboards.
 
 ---
 
@@ -77,7 +77,7 @@ CP structures are organised into **CP groups**. Each group is an independent Raf
 │               └────────┬────────┘                              │
 │                        │ PromQL                                │
 │               ┌─────────────────┐                              │
-│               │ Grafana  :3000  │  2 dashboards, anon auth     │
+│               │ Grafana  :3000  │  6 dashboards, anon auth     │
 │               └─────────────────┘                              │
 │                                                                │
 │  ┌──────────────────┐                                          │
@@ -209,21 +209,22 @@ docker compose up -d --build traffic-generator
 Hazelcast member (×5)
   → JMX / internal stats
     → Management Center (aggregates all members)
-      → /metrics  (Prometheus text format, V1 + V2)
+      → /metrics  (Prometheus text format, V1 only)
         → Prometheus scrapes every 15 s
           → Grafana queries via PromQL
 ```
 
 ### Metric format
 
-Management Center exports **two formats simultaneously** (`printers=V1,V2`):
+Management Center exports **V1 format only** (`printers=V1`):
 
 | Format | Prefix | Notes |
 |--------|--------|-------|
-| V2 | `hazelcast_` | Most operational metrics (heap, threads, map ops, TCP) |
-| V1 | `hz_` | Raft / CP-specific metrics — only available in V1 |
+| V1 | `hz_` | All metrics — runtime, Raft, CP structures, members |
 
-> All Raft and CP metrics use the `hz_raft_*` and `hz_cp_*` prefixes even when V2 is enabled. Do not use `hazelcast_raft_*` — those names do not exist.
+> Using both `printers=V1,V2` causes duplicate metric exports with the same timestamp, leading Prometheus to drop ~40 samples per scrape. V2 format (`hazelcast_*` prefix) is intentionally disabled. Do not add `V2` back.
+
+> Raft and CP metrics use the `hz_raft_*` and `hz_cp_*` prefixes. The V2 names `hazelcast_raft_*` do not exist.
 
 ### Key labels
 
@@ -276,23 +277,34 @@ Management Center exports **two formats simultaneously** (`printers=V1,V2`):
 | `hz:cp_group:term_increase_rate` | `rate(term[5m])` | Election frequency |
 | `hz:cp_group:commit_rate` | `rate(commitIndex[1m])` | Write throughput in entries/s |
 
-### Member health (V2 — `hazelcast_*`)
+### Member health (V1 — `hz_*`)
 
 | Metric | Description |
 |--------|-------------|
-| `hazelcast_runtime_up_time_seconds_total` | Member uptime |
-| `hazelcast_runtime_used_memory_bytes` | JVM heap used |
-| `hazelcast_memory_free_heap_bytes` | JVM heap free |
-| `hazelcast_os_process_cpu_load_ratio` | Process CPU usage |
-| `hazelcast_tcp_connection_active_total` | Active TCP connections |
+| `hz_runtime_uptime` | Member uptime (ms) |
+| `hz_runtime_usedMemory` | JVM heap used (bytes) |
+| `hz_runtime_freeMemory` | JVM heap free (bytes) |
+| `hz_os_processCpuLoad` | Process CPU usage |
+| `hz_tcp_connection_activeCount` | Active TCP connections |
 
 ---
 
 ## Dashboards
 
-Both dashboards are provisioned automatically and available at http://localhost:3000 (no login).
+All six dashboards are provisioned automatically and available at http://localhost:3000 (no login).
 
-### Template variables (both dashboards)
+### Dashboard list
+
+| UID | Title | Focus | Preview |
+|-----|-------|-------|---------|
+| `hz-cp-subsystem` | CP Subsystem Overview | Broad day-to-day health: cluster, Raft, CP inventory, maps, member health | [![cp-subsystem](images/cp-subsystem.png)](images/cp-subsystem.png) |
+| `hz-cp-subsystem-ops` | CP Subsystem Operations | Quorum health, contention, data structure lifecycle, sessions | [![cp-subsystem-operations](images/cp-subsystem-operations.png)](images/cp-subsystem-operations.png) |
+| `hz-raft` | HZ CP — Raft Internals | Deep dive: log replication, commit lag, snapshots, leader elections | [![raft-internals](images/raft-internals.png)](images/raft-internals.png) |
+| `hz-cp-health` | HZ CP — Subsystem Health | Membership, quorum status per group, Group Status table | [![cp-subsystem-health](images/cp-subsystem-health.png)](images/cp-subsystem-health.png) |
+| `hz-cp-maps` | HZ CP — Map Operations | Per-map entry count, storage, capacity, Raft write throughput | [![cp-map-operations](images/cp-map-operations.png)](images/cp-map-operations.png) |
+| `hz-cp-datastruct` | HZ CP — Data Structures | FencedLock, ISemaphore, IAtomicLong, CP Sessions inventory | [![cp-data-structures](images/cp-data-structures.png)](images/cp-data-structures.png) |
+
+### Template variables (all dashboards)
 
 | Variable | Source | Description |
 |----------|--------|-------------|
@@ -310,7 +322,7 @@ Broad operational view, designed for day-to-day health monitoring.
 
 | Panel | Type | Metric | What to watch |
 |-------|------|--------|---------------|
-| Active CP Members | Bar chart | `max(hz_raft_metadata_activeMembers)` | Should always be 5. Drop = member loss |
+| Reachable CP Members | Bar chart | `max(activeMembers) - max(missingMembers)` | Should always be 5. Reacts immediately when a member drops (unlike `activeMembers` alone which only updates after 8 h formal removal) |
 | CP Groups | Bar chart | `max(hz_raft_metadata_groups)` | Stable count; increases only on new group creation |
 | Missing CP Members | Bar chart | `max(hz_raft_missingMembers)` | Must be 0. Any value > 0 = alert |
 | Terminated Raft Groups | Bar chart | `max(hz_raft_terminatedRaftNodeGroupIds)` | Must be 0 |
@@ -372,7 +384,7 @@ Deeper operational view focused on quorum health, contention, and data structure
 
 | Panel | Type | Thresholds |
 |-------|------|------------|
-| Active CP Members | Stat (green ≥ 5 / yellow ≥ 3 / red < 3) | 5 = healthy, < 3 = quorum at risk |
+| Reachable CP Members | Stat (green ≥ 5 / yellow ≥ 3 / red < 3) | `activeMembers − missingMembers`. Reacts immediately when a member drops. 5 = healthy, < 3 = quorum at risk |
 | Missing CP Members | Stat (green = 0 / red ≥ 1) | Any missing member is an alert condition |
 | CP Groups | Stat | Should remain stable |
 | Destroyed Groups | Stat (green = 0 / orange ≥ 1) | Unexpected destruction of a CP group |
@@ -409,6 +421,133 @@ Deeper operational view focused on quorum health, contention, and data structure
 
 ---
 
+### Dashboard 3 — Raft Internals (`hz-raft`)
+
+Deep dive into Raft consensus mechanics. Use this when diagnosing slow writes, replication lag, or frequent elections.
+
+#### Row: Log Replication
+
+| Panel | Metric | What to watch |
+|-------|--------|---------------|
+| Commit Index vs Last Applied | `hz_raft_group_commitIndex` / `hz_raft_group_lastApplied` | Gap = application backlog. Persistent gap = overloaded state machine |
+| Commit Rate | `rate(commitIndex[1m])` | Write throughput in entries/s per group |
+| Apply Rate | `rate(lastApplied[1m])` | Application throughput; should track commit rate |
+| Commit Lag | `commitIndex − lastApplied` | Near zero in steady state; spike = application falling behind |
+
+#### Row: Log Structure
+
+| Panel | Metric | What to watch |
+|-------|--------|---------------|
+| Log Entries Since Snapshot | `lastLogIndex − snapshotIndex` | Approaches 10 000 (commit-index-advance-count-to-snapshot) before next snapshot |
+| Snapshot Index | `hz_raft_group_snapshotIndex` | Steps up periodically; long flat = no snapshots taken (log growing unbounded) |
+| Available Log Capacity | `hz_raft_group_availableLogCapacity` | Gauge: approaches 0 as log fills. Writes rejected at 0 |
+
+#### Row: Leadership
+
+| Panel | Metric | What to watch |
+|-------|--------|---------------|
+| Last Log Term vs Raft Term | `hz_raft_group_lastLogTerm` vs `hz_raft_group_term` | Divergence during leader election; should converge |
+| Raft Term | `hz_raft_group_term` | Flat = stable. Step = election |
+| Election Frequency | `changes(hz_raft_group_term[$__interval])` | Any non-zero = election occurred in that window |
+| Raft Leader per CP Group | State timeline of `hz_raft_group_term{role="LEADER"}` | Track which member leads each group; transitions = elections |
+
+---
+
+### Dashboard 4 — Subsystem Health (`hz-cp-health`)
+
+Membership and quorum health at a glance. Use this for on-call triage when CP alarms fire.
+
+#### Row: Cluster Membership
+
+| Panel | Metric | Thresholds |
+|-------|--------|------------|
+| Reachable CP Members | `max(activeMembers) − max(missingMembers)` | green=5, yellow≥3, red<3 |
+| Missing CP Members | `max(hz_raft_missingMembers)` | green=0, red≥1 |
+| Total CP Groups | `max(hz_raft_metadata_groups)` | stable; increase = new group created |
+
+#### Row: Quorum & Leadership
+
+| Panel | What to watch |
+|-------|---------------|
+| Group Member Count | Stat per group with thresholds: 3=green, 2=orange, 1=red. 1 = group unavailable |
+| Leader per Group | State timeline — which member leads each group over time |
+
+#### Row: Group Status Detail
+
+Full table: every group × member combination with `term`, `commitIndex`, `memberCount`, and `role`. Sort by `term` descending to spot lagging groups.
+
+#### Row: Scrape & MC Health
+
+| Panel | What to watch |
+|-------|---------------|
+| Scrape Targets Up | `up{job="hazelcast"}` — must be 1. 0 = MC unreachable, all CP metrics gone |
+
+---
+
+### Dashboard 5 — Map Operations (`hz-cp-maps`)
+
+Per-map entry counts, storage consumption, capacity headroom, and Raft write throughput.
+
+#### Row: Inventory Overview
+
+| Panel | Metric | What to watch |
+|-------|--------|---------------|
+| Total CP Map Entries | `sum(max by (name)(hz_cp_map_size))` | Overall key count across all maps |
+| Total CP Map Storage | `sum(max by (name)(hz_cp_map_sizeBytes))` | Total bytes; watch for growth |
+| Live Map Instances | `hz_cp_map_summary_live_count` | Per-group live CPMap count |
+| Destroyed Map Instances | `hz_cp_map_summary_destroyed_count` | Churn indicator |
+
+#### Row: Per-Map Data
+
+| Panel | Metric | What to watch |
+|-------|--------|---------------|
+| Entry Count per Map | `hz_cp_map_size` per `name` | Uneven distribution = hotspot |
+| Storage per Map | `hz_cp_map_sizeBytes` per `name` | Maps approaching `max-size-mb` |
+
+#### Row: Storage Capacity Check
+
+Gauge per map: `sizeBytes / max_size_mb` as a percentage. Alert threshold at 80 %.
+
+#### Row: Raft Write Throughput
+
+Commit rate per CP group (`group1`, `group5`) — shows how fast map writes are being committed to the Raft log.
+
+---
+
+### Dashboard 6 — Data Structures (`hz-cp-datastruct`)
+
+FencedLock, ISemaphore, IAtomicLong, and CP Session health.
+
+#### Row: Inventory
+
+| Panel | Metric | What it shows |
+|-------|--------|---------------|
+| Live Maps | `hz_cp_map_summary_live_count` | Per-group live CPMap count |
+| Lock acquire rate | `rate(hz_cp_lock_acquireCount[1m])` | Lock throughput per lock name |
+| Semaphore Available | `hz_cp_semaphore_available` | Permits remaining; 0 = blocked clients |
+| AtomicLong value | `hz_cp_atomiclong_value` | Current counter values |
+
+#### Row: FencedLock
+
+Lock acquisition rate per lock (`lock0`–`lock2` in `group2`). High and sustained rate on one lock = contention bottleneck.
+
+#### Row: ISemaphore
+
+Available permits over time (`sem0`–`sem2` across `group3`, `group7`). Permits touching 0 and recovering = healthy load. Staying at 0 = overloaded.
+
+#### Row: IAtomicLong
+
+Counter values over time (`counter0`–`counter4` across `group4`, `group6`). Slope = increment rate; flatline = traffic stopped.
+
+#### Row: CP Sessions
+
+| Panel | What to watch |
+|-------|---------------|
+| Session Heartbeat Version | Step-counter per session. Flatline = session stopped heartbeating → expiry in ≤ 60 s |
+| Session Expiry Table | All active sessions with their expiration time. Sessions close to expiry with no recent heartbeat = potential stuck client |
+
+---
+
 ## Alerting Rules
 
 Defined in [prometheus/rules/cp-subsystem.yml](prometheus/rules/cp-subsystem.yml):
@@ -417,7 +556,7 @@ Defined in [prometheus/rules/cp-subsystem.yml](prometheus/rules/cp-subsystem.yml
 |-------|-----------|----------|---------|
 | `CPMemberDown` | `up{job="hazelcast"} == 0` for 30 s | critical | MC lost connectivity to the cluster |
 | `CPMissingMembers` | `hz_raft_missingMembers > 0` for 30 s | critical | CP member unreachable — quorum may be at risk |
-| `CPGroupLeaderElection` | `increase(term[5m]) > 0` | warning | A leader election occurred in any CP group |
+| `CPGroupLeaderElection` | `changes(hz_raft_group_term[5m]) > 0` | warning | A leader election occurred in any CP group |
 | `CPGroupHighCommitLag` | `hz:cp_group:commit_lag > 100` for 1 m | warning | A follower is significantly behind the leader |
 
 > **Note:** The recording rules in `cp-subsystem.yml` still reference the non-existent V2 names (`hazelcast_raft_*`). They need to be updated to use the actual V1 names (`hz_raft_*`).

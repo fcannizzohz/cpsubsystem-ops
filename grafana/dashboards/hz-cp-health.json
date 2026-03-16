@@ -536,8 +536,8 @@
     {
       "id": 11,
       "type": "stat",
-      "title": "Group Member Count",
-      "description": "Members in each Raft group. group-size=3. At 2 the group is degraded but functional. At 1 the group is unavailable \u2014 no reads or writes can complete.",
+      "title": "CP Group Availability",
+      "description": "Per-group membership ratio: active reporters / expected (max seen across groups). 100% = all members present (green). >50% = degraded but quorum holds (orange). ≤50% = below quorum, group unavailable (red). Thresholds are group-size agnostic.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -554,41 +554,30 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "min by (name) (hz_raft_group_memberCount{mc_cluster=\"$cluster\", name=~\"$cp_group\"})",
+          "expr": "count by (name) (hz_raft_group_memberCount{mc_cluster=\"$cluster\"})\n/\nscalar(max(count by (name) (hz_raft_group_memberCount{mc_cluster=\"$cluster\"})))",
           "legendFormat": "{{name}}",
           "refId": "A"
         }
       ],
       "options": {
         "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ]
+          "calcs": ["lastNotNull"]
         },
         "colorMode": "background",
-        "graphMode": "area",
+        "graphMode": "none",
         "textMode": "auto",
         "orientation": "auto"
       },
       "fieldConfig": {
         "defaults": {
           "decimals": 0,
-          "unit": "short",
+          "unit": "percentunit",
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              {
-                "color": "red",
-                "value": 0
-              },
-              {
-                "color": "orange",
-                "value": 2
-              },
-              {
-                "color": "green",
-                "value": 3
-              }
+              { "color": "red",    "value": 0    },
+              { "color": "orange", "value": 0.51 },
+              { "color": "green",  "value": 1.0  }
             ]
           }
         },
