@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<hazelcast xmlns="http://www.hazelcast.com/schema/config"
+           xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+           xsi:schemaLocation="http://www.hazelcast.com/schema/config
+           https://hazelcast.com/schema/config/hazelcast-config-5.6.xsd">
+
+  <cluster-name>dev</cluster-name>
+
+  <network>
+    <port auto-increment="false">5701</port>
+    <outbound-ports>
+      <ports>0</ports>
+    </outbound-ports>
+    <join>
+      <multicast enabled="false"/>
+      <tcp-ip enabled="true">
+        <member>hz1:5701</member>
+        <member>hz2:5701</member>
+        <member>hz3:5701</member>
+        <member>hz4:5701</member>
+        <member>hz5:5701</member>
+      </tcp-ip>
+    </join>
+    <!--
+      Enable REST API endpoints:
+        HEALTH_CHECK  → /hazelcast/health/ready  (used by docker healthcheck)
+        CLUSTER_READ  → cluster info REST calls (used by cp-status.sh)
+      METRICS endpoint is intentionally disabled – Prometheus scrapes
+      Management Center instead, which aggregates metrics from all members.
+    -->
+    <rest-api enabled="true">
+      <endpoint-group name="HEALTH_CHECK"  enabled="true"/>
+      <endpoint-group name="CLUSTER_READ"  enabled="true"/>
+      <endpoint-group name="CLUSTER_WRITE" enabled="false"/>
+      <endpoint-group name="DATA"          enabled="false"/>
+    </rest-api>
+  </network>
+
+  <!--
+    CP Subsystem configuration
+    ─────────────────────────
+    cp-member-count : all 5 members participate in CP
+    group-size      : each CP group uses 3 members (can tolerate 1 failure)
+
+    The METADATA CP group is created automatically once cp-member-count
+    members have joined. Additional named CP groups (e.g., "locks", "counters")
+    are created on first use when a data structure is allocated with a
+    @CPGroup("group-name") annotation or via the HazelcastInstance API.
+  -->
+<cp-subsystem>
+    <cp-member-count>5</cp-member-count>
+    <group-size>3</group-size>
+    <session-time-to-live-seconds>60</session-time-to-live-seconds>
+    <session-heartbeat-interval-seconds>5</session-heartbeat-interval-seconds>
+    <missing-cp-member-auto-removal-seconds>28800</missing-cp-member-auto-removal-seconds>
+    <fail-on-indeterminate-operation-state>false</fail-on-indeterminate-operation-state>
+    <data-load-timeout-seconds>120</data-load-timeout-seconds>
+    <persistence-enabled>false</persistence-enabled>
+    <base-dir>/data/persistence/cp-data</base-dir>
+
+    <maps>
+      <map> <name>map0</name><max-size-mb>20</max-size-mb></map>
+      <map> <name>map1</name><max-size-mb>20</max-size-mb></map>
+      <map> <name>map2</name><max-size-mb>20</max-size-mb></map>
+      <map> <name>map3</name><max-size-mb>20</max-size-mb></map>
+      <map> <name>map4</name><max-size-mb>20</max-size-mb></map>
+      <map> <name>map5</name><max-size-mb>20</max-size-mb></map>
+      <map> <name>map6</name><max-size-mb>20</max-size-mb></map>
+      <map> <name>map7</name><max-size-mb>20</max-size-mb></map>
+      <map> <name>map8</name><max-size-mb>20</max-size-mb></map>
+      <map> <name>map9</name><max-size-mb>20</max-size-mb></map>
+    </maps>
+
+    <raft-algorithm>
+      <leader-election-timeout-in-millis>8000</leader-election-timeout-in-millis>
+      <leader-heartbeat-period-in-millis>1000</leader-heartbeat-period-in-millis>
+      <max-missed-leader-heartbeat-count>10</max-missed-leader-heartbeat-count>
+      <append-request-backoff-timeout-in-millis>250</append-request-backoff-timeout-in-millis>
+      <commit-index-advance-count-to-snapshot>10000</commit-index-advance-count-to-snapshot>
+      <append-request-max-entry-count>200</append-request-max-entry-count>
+      <uncommitted-entry-count-to-reject-new-appends>200</uncommitted-entry-count-to-reject-new-appends>
+    </raft-algorithm>
+
+    <semaphores>
+      <semaphore>
+        <name>*</name>
+        <jdk-compatible>false</jdk-compatible>
+        <initial-permits>1</initial-permits>
+      </semaphore>
+    </semaphores>
+  </cp-subsystem>
+  <!--
+    Map configurations: kept minimal; the focus of this project is CP.
+  -->
+  <map name="default">
+    <in-memory-format>BINARY</in-memory-format>
+    <backup-count>1</backup-count>
+    <statistics-enabled>true</statistics-enabled>
+  </map>
+
+</hazelcast>

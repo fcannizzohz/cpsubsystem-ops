@@ -1,0 +1,138 @@
+version: "3.8"
+
+networks:
+  hz-net:
+    driver: bridge
+
+volumes:
+  prometheus-data: {}
+  grafana-data: {}
+
+x-hz-common: &hz-common
+  image: hazelcast/hazelcast-enterprise:5.6.0
+  networks:
+    - hz-net
+  volumes:
+    - ./hazelcast/hazelcast.xml:/opt/hazelcast/config/hazelcast.xml:ro
+  environment:
+    HZ_LICENSEKEY: ${HZ_LICENSEKEY}
+    JAVA_OPTS: >-
+      -Dhazelcast.config=/opt/hazelcast/config/hazelcast.xml
+      -Dhazelcast.phone.home.enabled=false
+  healthcheck:
+    test: ["CMD-SHELL", "curl -sf http://localhost:5701/hazelcast/health/ready || exit 1"]
+    interval: 10s
+    timeout: 5s
+    retries: 15
+    start_period: 40s
+
+services:
+  hz1:
+    <<: *hz-common
+    container_name: hz1
+    hostname: hz1
+    ports:
+      - "5701:5701"
+
+  hz2:
+    <<: *hz-common
+    container_name: hz2
+    hostname: hz2
+    ports:
+      - "5702:5701"
+
+  hz3:
+    <<: *hz-common
+    container_name: hz3
+    hostname: hz3
+    ports:
+      - "5703:5701"
+
+  hz4:
+    <<: *hz-common
+    container_name: hz4
+    hostname: hz4
+    ports:
+      - "5704:5701"
+
+  hz5:
+    <<: *hz-common
+    container_name: hz5
+    hostname: hz5
+    ports:
+      - "5705:5701"
+
+  management-center:
+    image: hazelcast/management-center:5.9.0
+    container_name: management-center
+    hostname: management-center
+    ports:
+      - "8080:8080"
+    environment:
+      MC_LICENSE: ${HZ_LICENSEKEY}
+      MC_DEFAULT_CLUSTER_NAME: dev
+      MC_DEFAULT_CLUSTER_MEMBERS: "hz1:5701,hz2:5701,hz3:5701,hz4:5701,hz5:5701"
+      # Expose aggregated metrics at http://management-center:8080/metrics
+      # Disable timestamps so Prometheus doesn't discard metrics during clock skew.
+      JAVA_OPTS: >-
+        -Dhazelcast.mc.prometheusExporter.enabled=true
+        -Dhazelcast.mc.prometheusExporter.timestamp.enabled=false
+        -Dhazelcast.mc.prometheusExporter.printers=V1,V2
+    networks:
+      - hz-net
+    depends_on:
+      hz1:
+        condition: service_healthy
+
+  prometheus:
+    image: prom/prometheus:v2.53.1
+    container_name: prometheus
+    hostname: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus-data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=15d"
+      - "--web.enable-lifecycle"
+    networks:
+      - hz-net
+    depends_on:
+      - management-center
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    hostname: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: "Admin"
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/hz-cp-subsystem.json
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    networks:
+      - hz-net
+    depends_on:
+      - prometheus
+
+  traffic-generator:
+    build: ./traffic-generator
+    container_name: traffic-generator
+    restart: on-failure
+    environment:
+      HZ_CLUSTER_NAME: dev
+      HZ_MEMBERS: "hz1:5701,hz2:5701,hz3:5701,hz4:5701,hz5:5701"
+    networks:
+      - hz-net
+    depends_on:
+      hz1:
+        condition: service_healthy
+
