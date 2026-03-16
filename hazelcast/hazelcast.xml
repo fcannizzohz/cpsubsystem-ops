@@ -58,17 +58,20 @@
     <persistence-enabled>false</persistence-enabled>
     <base-dir>/data/persistence/cp-data</base-dir>
 
+    <!--
+      CPMaps in group1 (traffic-generator: map0@group1 … map9@group1)
+    -->
     <maps>
-      <map> <name>map0</name><max-size-mb>20</max-size-mb></map>
-      <map> <name>map1</name><max-size-mb>20</max-size-mb></map>
-      <map> <name>map2</name><max-size-mb>20</max-size-mb></map>
-      <map> <name>map3</name><max-size-mb>20</max-size-mb></map>
-      <map> <name>map4</name><max-size-mb>20</max-size-mb></map>
-      <map> <name>map5</name><max-size-mb>20</max-size-mb></map>
-      <map> <name>map6</name><max-size-mb>20</max-size-mb></map>
-      <map> <name>map7</name><max-size-mb>20</max-size-mb></map>
-      <map> <name>map8</name><max-size-mb>20</max-size-mb></map>
-      <map> <name>map9</name><max-size-mb>20</max-size-mb></map>
+      <map> <name>map0</name><max-size-mb>20</max-size-mb> </map>
+      <map> <name>map1</name><max-size-mb>20</max-size-mb> </map>
+      <map> <name>map2</name><max-size-mb>20</max-size-mb> </map>
+      <map> <name>map3</name><max-size-mb>20</max-size-mb> </map>
+      <map> <name>map4</name><max-size-mb>20</max-size-mb> </map>
+      <map> <name>map5</name><max-size-mb>20</max-size-mb> </map>
+      <map> <name>map6</name><max-size-mb>20</max-size-mb> </map>
+      <map> <name>map7</name><max-size-mb>20</max-size-mb> </map>
+      <map> <name>map8</name><max-size-mb>20</max-size-mb> </map>
+      <map> <name>map9</name><max-size-mb>20</max-size-mb> </map>
     </maps>
 
     <raft-algorithm>

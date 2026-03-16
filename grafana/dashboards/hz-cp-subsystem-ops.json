@@ -1,0 +1,601 @@
+{
+  "title": "HZ CP Subsystem – Operations",
+  "uid": "hz-cp-ops",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "10s",
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "templating": {
+    "list": [
+      {
+        "name": "cluster",
+        "label": "Cluster",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "definition": "label_values(hazelcast_runtime_up_time_seconds_total, mc_cluster)",
+        "query": {
+          "query": "label_values(hazelcast_runtime_up_time_seconds_total, mc_cluster)",
+          "refId": "StandardVariableQuery"
+        },
+        "sort": 1,
+        "multi": false,
+        "includeAll": false,
+        "refresh": 2,
+        "hide": 0,
+        "current": {}
+      },
+      {
+        "name": "cp_group",
+        "label": "CP Group",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "definition": "label_values(hz_raft_group_term{mc_cluster=\"$cluster\"}, name)",
+        "query": {
+          "query": "label_values(hz_raft_group_term{mc_cluster=\"$cluster\"}, name)",
+          "refId": "StandardVariableQuery"
+        },
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "refresh": 2,
+        "hide": 0,
+        "current": {}
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "Cluster & CP Member Health",
+      "collapsed": false,
+      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 1 },
+      "panels": []
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Active CP Members",
+      "description": "Number of active CP members in the METADATA group. Should equal cp-member-count (5).",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 0, "y": 1, "w": 6, "h": 4 },
+      "targets": [{
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "expr": "max(hz_raft_metadata_activeMembers{mc_cluster=\"$cluster\"})",
+        "legendFormat": "active members",
+        "refId": "A"
+      }],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": 0 },
+              { "color": "yellow", "value": 3 },
+              { "color": "green", "value": 5 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Missing CP Members",
+      "description": "CP members unreachable but not yet removed. Any value > 0 is a warning.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 6, "y": 1, "w": 6, "h": 4 },
+      "targets": [{
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "expr": "max(hz_raft_missingMembers{mc_cluster=\"$cluster\"})",
+        "legendFormat": "missing members",
+        "refId": "A"
+      }],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": 0 },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "CP Groups",
+      "description": "Total number of CP groups tracked by the METADATA group.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 12, "y": 1, "w": 6, "h": 4 },
+      "targets": [{
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "expr": "max(hz_raft_metadata_groups{mc_cluster=\"$cluster\"})",
+        "legendFormat": "groups",
+        "refId": "A"
+      }],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": { "decimals": 0, "unit": "short" },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Destroyed Groups",
+      "description": "Count of terminated Raft group node IDs. Should remain 0 in normal operation.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 18, "y": 1, "w": 6, "h": 4 },
+      "targets": [{
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "expr": "max(hz_raft_terminatedRaftNodeGroupIds{mc_cluster=\"$cluster\"})",
+        "legendFormat": "destroyed",
+        "refId": "A"
+      }],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": 0 },
+              { "color": "orange", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 10,
+      "type": "row",
+      "title": "Raft Consensus Health",
+      "collapsed": false,
+      "gridPos": { "x": 0, "y": 5, "w": 24, "h": 1 },
+      "panels": []
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Commit Index vs Last Applied (per group)",
+      "description": "commitIndex leads lastApplied. A persistent gap indicates replication lag — entries committed by the leader but not yet applied by followers.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 0, "y": 6, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "max by (name) (hz_raft_group_commitIndex{mc_cluster=\"$cluster\", name=~\"$cp_group\"})",
+          "legendFormat": "commitIndex – {{name}}",
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "max by (name) (hz_raft_group_lastApplied{mc_cluster=\"$cluster\", name=~\"$cp_group\"})",
+          "legendFormat": "lastApplied – {{name}}",
+          "refId": "B"
+        }
+      ],
+      "options": {
+        "tooltip": { "mode": "multi" },
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull"] }
+      },
+      "fieldConfig": {
+        "defaults": { "custom": { "lineWidth": 2, "fillOpacity": 5 }, "min": 0 },
+        "overrides": []
+      }
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Raft Term (per group)",
+      "description": "Each step-up indicates a leader election. Frequent changes signal instability.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 12, "y": 6, "w": 12, "h": 8 },
+      "targets": [{
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "expr": "max by (name) (hz_raft_group_term{mc_cluster=\"$cluster\", name=~\"$cp_group\"})",
+        "legendFormat": "{{name}}",
+        "refId": "A"
+      }],
+      "options": {
+        "tooltip": { "mode": "multi" },
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] }
+      },
+      "fieldConfig": {
+        "defaults": { "custom": { "lineWidth": 2, "fillOpacity": 5 }, "decimals": 0, "min": 0 },
+        "overrides": []
+      }
+    },
+    {
+      "id": 13,
+      "type": "gauge",
+      "title": "Available Log Capacity (per group)",
+      "description": "Remaining Raft log slots before the log is full. Approaches 0 when writes outpace snapshots. Configured max: commit-index-advance-count-to-snapshot (10000).",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 0, "y": 14, "w": 12, "h": 8 },
+      "targets": [{
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "expr": "min by (name) (hz_raft_group_availableLogCapacity{mc_cluster=\"$cluster\", name=~\"$cp_group\"})",
+        "legendFormat": "{{name}}",
+        "refId": "A"
+      }],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "orientation": "auto",
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "min": 0,
+          "max": 11200,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": 0 },
+              { "color": "yellow", "value": 1000 },
+              { "color": "green", "value": 3000 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 14,
+      "type": "stat",
+      "title": "Group Member Count (quorum)",
+      "description": "Member count per Raft group. Configured group-size=3. Drop to 2 = degraded (quorum holds). Drop to 1 = quorum lost.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 12, "y": 14, "w": 12, "h": 8 },
+      "targets": [{
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "expr": "min by (name) (hz_raft_group_memberCount{mc_cluster=\"$cluster\", name=~\"$cp_group\"})",
+        "legendFormat": "{{name}}",
+        "refId": "A"
+      }],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "orientation": "horizontal",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": 0 },
+              { "color": "orange", "value": 2 },
+              { "color": "green", "value": 3 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 20,
+      "type": "row",
+      "title": "CP Data Structures",
+      "collapsed": false,
+      "gridPos": { "x": 0, "y": 22, "w": 24, "h": 1 },
+      "panels": []
+    },
+    {
+      "id": 21,
+      "type": "stat",
+      "title": "Live CP Maps",
+      "description": "Active CPMap instances. Populated by hz_cp_map_summary_live_count.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 0, "y": 23, "w": 6, "h": 4 },
+      "targets": [{
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "expr": "max(hz_cp_map_summary_live_count{mc_cluster=\"$cluster\"})",
+        "legendFormat": "live maps",
+        "refId": "A"
+      }],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": { "decimals": 0, "unit": "short" },
+        "overrides": []
+      }
+    },
+    {
+      "id": 22,
+      "type": "stat",
+      "title": "Live AtomicLongs",
+      "description": "Active IAtomicLong instances. Will populate when atomiclong CP data structures are used.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 6, "y": 23, "w": 6, "h": 4 },
+      "targets": [{
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "expr": "max(hz_cp_atomiclong_summary_live_count{mc_cluster=\"$cluster\"})",
+        "legendFormat": "live atomicLongs",
+        "refId": "A"
+      }],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": { "decimals": 0, "unit": "short" },
+        "overrides": []
+      }
+    },
+    {
+      "id": 23,
+      "type": "stat",
+      "title": "Live Locks (FencedLock)",
+      "description": "Active FencedLock instances. Will populate when lock CP data structures are used.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 12, "y": 23, "w": 6, "h": 4 },
+      "targets": [{
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "expr": "max(hz_cp_lock_summary_live_count{mc_cluster=\"$cluster\"})",
+        "legendFormat": "live locks",
+        "refId": "A"
+      }],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": { "decimals": 0, "unit": "short" },
+        "overrides": []
+      }
+    },
+    {
+      "id": 24,
+      "type": "stat",
+      "title": "Live Semaphores",
+      "description": "Active ISemaphore instances. Will populate when semaphore CP data structures are used.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 18, "y": 23, "w": 6, "h": 4 },
+      "targets": [{
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "expr": "max(hz_cp_semaphore_summary_live_count{mc_cluster=\"$cluster\"})",
+        "legendFormat": "live semaphores",
+        "refId": "A"
+      }],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": { "decimals": 0, "unit": "short" },
+        "overrides": []
+      }
+    },
+    {
+      "id": 25,
+      "type": "barchart",
+      "title": "Destroyed CP Objects by Type",
+      "description": "Tracks object churn. A rising count means structures are being created and destroyed frequently.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 0, "y": 27, "w": 24, "h": 8 },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "max(hz_cp_map_summary_destroyed_count{mc_cluster=\"$cluster\"})",
+          "legendFormat": "map",
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "max(hz_cp_atomiclong_summary_destroyed_count{mc_cluster=\"$cluster\"})",
+          "legendFormat": "atomiclong",
+          "refId": "B"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "max(hz_cp_lock_summary_destroyed_count{mc_cluster=\"$cluster\"})",
+          "legendFormat": "lock",
+          "refId": "C"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "max(hz_cp_semaphore_summary_destroyed_count{mc_cluster=\"$cluster\"})",
+          "legendFormat": "semaphore",
+          "refId": "D"
+        }
+      ],
+      "options": {
+        "xField": "Time",
+        "barWidth": 0.9,
+        "fillOpacity": 80,
+        "tooltip": { "mode": "multi" },
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      },
+      "fieldConfig": {
+        "defaults": { "decimals": 0, "unit": "short", "min": 0 },
+        "overrides": []
+      }
+    },
+    {
+      "id": 30,
+      "type": "row",
+      "title": "Lock & Semaphore Contention",
+      "collapsed": false,
+      "gridPos": { "x": 0, "y": 35, "w": 24, "h": 1 },
+      "panels": []
+    },
+    {
+      "id": 31,
+      "type": "timeseries",
+      "title": "Lock Acquisition Count (per lock)",
+      "description": "Rate of FencedLock acquisitions per lock name. High rate on a single lock indicates contention. Requires FencedLock usage — no data until locks are used.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 0, "y": 36, "w": 12, "h": 8 },
+      "targets": [{
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "expr": "rate(hz_cp_lock_acquireCount{mc_cluster=\"$cluster\"}[1m])",
+        "legendFormat": "{{name}}",
+        "refId": "A"
+      }],
+      "options": {
+        "tooltip": { "mode": "multi" },
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": { "lineWidth": 2, "fillOpacity": 5 },
+          "min": 0
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 32,
+      "type": "timeseries",
+      "title": "Semaphore Available Permits",
+      "description": "Available permits per semaphore. Drops to 0 = resource starvation / all permits acquired. Requires ISemaphore usage.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 12, "y": 36, "w": 12, "h": 8 },
+      "targets": [{
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "expr": "hz_cp_semaphore_available{mc_cluster=\"$cluster\"}",
+        "legendFormat": "{{name}}",
+        "refId": "A"
+      }],
+      "options": {
+        "tooltip": { "mode": "multi" },
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "min"] }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "unit": "short",
+          "custom": { "lineWidth": 2, "fillOpacity": 10 },
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": 0 },
+              { "color": "yellow", "value": 1 },
+              { "color": "green", "value": 2 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 40,
+      "type": "row",
+      "title": "CP Sessions",
+      "collapsed": false,
+      "gridPos": { "x": 0, "y": 44, "w": 24, "h": 1 },
+      "panels": []
+    },
+    {
+      "id": 41,
+      "type": "timeseries",
+      "title": "Session Heartbeat Version (per session)",
+      "description": "Increments on each session heartbeat. A flat line means the session has stopped heartbeating and may be close to expiry. Requires CP sessions (FencedLock / ISemaphore).",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 0, "y": 45, "w": 12, "h": 8 },
+      "targets": [{
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "expr": "hz_cp_session_version{mc_cluster=\"$cluster\"}",
+        "legendFormat": "session {{id}} @ {{mc_member}}",
+        "refId": "A"
+      }],
+      "options": {
+        "tooltip": { "mode": "multi" },
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull"] }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "custom": { "lineWidth": 2, "fillOpacity": 5 },
+          "min": 0
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 42,
+      "type": "table",
+      "title": "CP Session Expiry",
+      "description": "Sessions with their expiration timestamps. Sessions close to expiry without heartbeats indicate a hung client. Requires CP sessions.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 12, "y": 45, "w": 12, "h": 8 },
+      "targets": [{
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "expr": "hz_cp_session_expirationTime{mc_cluster=\"$cluster\"}",
+        "legendFormat": "{{id}} @ {{mc_member}}",
+        "instant": true,
+        "refId": "A"
+      }],
+      "options": {
+        "sortBy": [{ "displayName": "Value", "desc": false }]
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "dateTimeAsIso",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "transformations": [
+        { "id": "merge", "options": {} }
+      ]
+    }
+  ]
+}
