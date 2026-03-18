@@ -21,6 +21,7 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from analysis import build_context, summarise_instant, summarise_range
+from cluster import derive_context
 from llm import AVAILABLE_MODELS, analyse
 from prom import PrometheusClient, choose_step
 from queries import INSTANT_QUERIES, RANGE_QUERIES
@@ -157,11 +158,13 @@ async def analyse_endpoint(
             query_meta=query_meta,
         )
 
+        cluster_context = await derive_context(prom)
+
         yield sse("status", "Analysing with LLM…")
 
         # ── Stream LLM response ───────────────────────────────────────────
         try:
-            async for chunk in analyse(context, model):
+            async for chunk in analyse(context, cluster_context, model):
                 yield f"data: {json.dumps(chunk)}\n\n"
         except Exception as exc:
             yield sse("agent_error", str(exc))
