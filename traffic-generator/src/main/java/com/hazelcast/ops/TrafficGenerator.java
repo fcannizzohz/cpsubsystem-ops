@@ -23,10 +23,10 @@ import java.util.concurrent.atomic.LongAdder;
  * meaningful metrics in the Grafana dashboard.
  *
  * CP groups used: group1 … group7
- *   - CPMaps    : map0@group1 … map9@group1  (all maps in group1)
- *   - FencedLock: lock0@group2 … lock2@group2
- *   - ISemaphore: sem0@group3  … sem2@group3
- *   - IAtomicLong: counter0@group4 … counter4@group4
+ *   - CPMaps     : map0–map4@group1,  map5–map9@group5
+ *   - FencedLock : lock0–lock2@group2
+ *   - ISemaphore : sem0–sem1@group3,  sem2@group7
+ *   - IAtomicLong: counter0–counter2@group4,  counter3–counter4@group6
  *
  * Configuration via environment variables:
  *   HZ_CLUSTER_NAME  – cluster name         (default: dev)
