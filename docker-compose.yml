@@ -148,6 +148,21 @@ services:
     depends_on:
       - prometheus
 
+  mcp-hazelcast:
+    build: ./ai/hz-mcp-server
+    container_name: mcp-hazelcast
+    hostname: mcp-hazelcast
+    environment:
+      HZ_MEMBERS: "hz1,hz2,hz3,hz4,hz5"
+      PORT: "8002"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - hz-net
+    depends_on:
+      hz1:
+        condition: service_healthy
+
   analysis-agent:
     build: ./ai/analysis-agent
     container_name: analysis-agent
@@ -156,6 +171,7 @@ services:
     environment:
       PROMETHEUS_URL: "http://prometheus:9090"
       MCP_SERVER_URL: "http://mcp-prometheus:8001"
+      MCP_HZ_URL: "http://mcp-hazelcast:8002"
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     networks:
@@ -163,4 +179,5 @@ services:
     depends_on:
       - prometheus
       - mcp-prometheus
+      - mcp-hazelcast
 
