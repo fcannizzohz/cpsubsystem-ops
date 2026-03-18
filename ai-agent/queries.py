@@ -97,6 +97,31 @@ INSTANT_QUERIES: list[InstantQuery] = [
         description="Number of Raft nodes hosted by each member",
         healthy_hint="Should be equal across members (~3 for group-size=3 with 8 groups)",
     ),
+    # ── Data structures ───────────────────────────────────────────────────
+    InstantQuery(
+        name="semaphore_available",
+        query="hz_cp_semaphore_available",
+        description="Available permits per ISemaphore (current snapshot)",
+        healthy_hint="Equal to initial permit count = idle; 0 = exhausted, clients will block",
+    ),
+    InstantQuery(
+        name="lock_hold_count",
+        query="hz_cp_lock_lockCount",
+        description="Current concurrent lock holders per FencedLock",
+        healthy_hint="0 = idle; 1 = one holder; >1 unexpected for non-reentrant FencedLock",
+    ),
+    InstantQuery(
+        name="atomiclong_values",
+        query="hz_cp_atomiclong_value",
+        description="Current value of each IAtomicLong counter",
+        healthy_hint="Monotonically increasing under load; use rate for throughput signal",
+    ),
+    InstantQuery(
+        name="lock_acquire_rate",
+        query="rate(hz_cp_lock_acquireCount[5m])",
+        description="FencedLock acquisition rate at end of window (5-minute trailing rate)",
+        healthy_hint="Non-zero = locks are being acquired; zero = no lock activity",
+    ),
 ]
 
 
@@ -149,5 +174,34 @@ RANGE_QUERIES: list[RangeQuery] = [
         description="State-machine apply rate per CP group",
         unit="entries/s",
         healthy_hint="Should track commit rate closely; divergence = application backlog building",
+    ),
+    # ── Data structures ───────────────────────────────────────────────────
+    RangeQuery(
+        name="semaphore_permits_over_time",
+        query="hz_cp_semaphore_available",
+        description="Available ISemaphore permits over time",
+        unit="permits",
+        healthy_hint="Stable near initial count = low contention; drops + recovery = healthy burst; sustained at 0 = exhaustion",
+    ),
+    RangeQuery(
+        name="lock_acquire_rate",
+        query="rate(hz_cp_lock_acquireCount[1m])",
+        description="FencedLock acquisition rate per lock",
+        unit="acquisitions/s",
+        healthy_hint="Proportional to workload; zero = no lock activity; spike = burst or contention",
+    ),
+    RangeQuery(
+        name="atomiclong_increment_rate",
+        query="rate(hz_cp_atomiclong_value[1m])",
+        description="IAtomicLong increment rate per counter",
+        unit="increments/s",
+        healthy_hint="Proportional to counter workload; zero = no counter activity",
+    ),
+    RangeQuery(
+        name="session_heartbeat_rate",
+        query="rate(hz_cp_session_version[30s])",
+        description="CP session heartbeat rate (version increments per second)",
+        unit="heartbeats/s",
+        healthy_hint="Non-zero = sessions are active and heartbeating; zero = no active sessions or sessions stalled",
     ),
 ]

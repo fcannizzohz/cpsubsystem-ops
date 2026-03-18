@@ -88,6 +88,8 @@ async def analyse_endpoint(
     start: Annotated[float, Query(description="Unix timestamp — window start")],
     end: Annotated[float, Query(description="Unix timestamp — window end")],
     model: Annotated[str, Query(description="LLM model id")] = "claude-sonnet-4-6",
+    prometheus_url: Annotated[str, Query(description="Prometheus base URL")] = PROMETHEUS_URL,
+    user_context: Annotated[str, Query(description="JSON array of operator context paragraphs")] = "[]",
 ):
     """
     Stream the analysis as Server-Sent Events.
@@ -95,7 +97,7 @@ async def analyse_endpoint(
     """
 
     async def event_stream():
-        prom = PrometheusClient(PROMETHEUS_URL)
+        prom = PrometheusClient(prometheus_url)
         duration = end - start
         step = choose_step(duration)
 
@@ -167,11 +169,16 @@ async def analyse_endpoint(
 
         cluster_context = await derive_context(prom)
 
+        try:
+            ctx_list: list[str] = json.loads(user_context) if user_context else []
+        except Exception:
+            ctx_list = []
+
         yield sse("status", "Analysing with LLM…")
 
         # ── Stream LLM response ───────────────────────────────────────────
         try:
-            async for chunk in analyse(context, cluster_context, model):
+            async for chunk in analyse(context, cluster_context, model, ctx_list):
                 yield f"data: {json.dumps(chunk)}\n\n"
         except Exception as exc:
             yield sse("agent_error", str(exc))
