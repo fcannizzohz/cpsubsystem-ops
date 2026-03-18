@@ -137,7 +137,7 @@ services:
         condition: service_healthy
 
   mcp-prometheus:
-    build: ./mcp-server
+    build: ./ai/prom-mcp-server
     container_name: mcp-prometheus
     hostname: mcp-prometheus
     environment:
@@ -148,9 +148,9 @@ services:
     depends_on:
       - prometheus
 
-  ai-agent:
-    build: ./ai-agent
-    container_name: ai-agent
+  analysis-agent:
+    build: ./ai/analysis-agent
+    container_name: analysis-agent
     ports:
       - "8000:8000"
     environment:

@@ -20,6 +20,8 @@ A self-contained Docker Compose environment for running, load-testing, and monit
 12. [AI Analysis Agent](#ai-analysis-agent)
 13. [TODO](#todo)
 
+
+
 ---
 
 ## What is the CP Subsystem?
@@ -71,15 +73,23 @@ CP structures are organised into **CP groups**. Each group is an independent Raf
 │               │ Management      │  ← aggregates metrics from   │
 │               │ Center :8080    │    all 5 members             │
 │               └────────┬────────┘                              │
-│                        │ /metrics (V1+V2 Prometheus format)    │
+│                        │ /metrics (V1 Prometheus format)       │
 │               ┌─────────────────┐                              │
 │               │ Prometheus      │  scrape interval: 15s        │
 │               │ :9090           │  retention: 15d              │
-│               └────────┬────────┘                              │
-│                        │ PromQL                                │
-│               ┌─────────────────┐                              │
-│               │ Grafana  :3000  │  6 dashboards, anon auth     │
-│               └─────────────────┘                              │
+│               └────┬───────┬───┘                              │
+│                    │       │ PromQL                            │
+│             ┌──────┘  ┌────────────────────┐                  │
+│             │         │ prom-mcp-server     │                  │
+│    ┌─────────────┐    │ :8001 (MCP/SSE)     │                  │
+│    │ Grafana     │    │ Prometheus tools    │                  │
+│    │ :3000       │    └──────────┬──────────┘                  │
+│    │ 6 dashboards│               │ MCP (SSE)                  │
+│    └─────────────┘    ┌──────────────────┐                    │
+│                       │ analysis-agent   │                    │
+│                       │ :8000            │                    │
+│                       │ UI + LLM + chat  │                    │
+│                       └──────────────────┘                    │
 │                                                                │
 │  ┌──────────────────┐                                          │
 │  │ traffic-generator│  CPMap + FencedLock + ISemaphore +       │
@@ -100,6 +110,7 @@ CP structures are organised into **CP groups**. Each group is an independent Raf
 | Management Center | 8080 | UI + Prometheus `/metrics` |
 | Prometheus | 9090 | Query + alerting |
 | Grafana | 3000 | Dashboards |
+| analysis-agent | 8000 | AI analysis UI + chat |
 
 ---
 
@@ -579,40 +590,57 @@ Defined in [prometheus/rules/cp-subsystem.yml](prometheus/rules/cp-subsystem.yml
 
 ## AI Analysis Agent
 
-[ai-agent/](ai-agent/) is a FastAPI service that queries Prometheus directly, summarises the metric data, and streams an LLM-generated health analysis back to a browser UI (Strategy 2 — Prometheus → LLM).
+The AI analysis stack lives under [ai/](ai/) and consists of two services:
+
+| Directory | Docker service | Purpose |
+|-----------|---------------|---------|
+| [ai/analysis-agent/](ai/analysis-agent/) | `analysis-agent` (:8000) | FastAPI UI + LLM streaming analysis + follow-up chat |
+| [ai/prom-mcp-server/](ai/prom-mcp-server/) | `mcp-prometheus` (:8001) | MCP server exposing Prometheus tools over HTTP/SSE |
 
 ### How it works
 
-1. On request the agent runs **11 instant queries** (current state snapshot) and **7 range queries** (time-series over the chosen window) against Prometheus in parallel.
-2. Each time-series is summarised server-side into `{min, max, avg, latest, trend, spike_count}` — no raw arrays are sent to the model.
-3. The compact context block is streamed to the selected model with an SRE-focused system prompt that knows the cluster topology and healthy-value baselines.
-4. The response streams back via Server-Sent Events and renders in the browser.
+**Analysis flow:**
+
+1. The UI runs up to **15 instant queries** (current state) and **11 range queries** (time-series over the chosen window) against Prometheus in parallel.
+2. Each time-series is summarised server-side into `{min, max, avg, latest, trend, spike_count}` — no raw arrays reach the model.
+3. Cluster topology (CP members, groups, quorum) is derived from live Prometheus data and injected as structured context.
+4. An optional **Operator Context** panel lets you inject free-text notes (recent deployments, incidents) that are included in the prompt and persisted in `localStorage`.
+5. The LLM response streams back via Server-Sent Events and renders as Markdown.
+
+**Follow-up chat flow:**
+
+After analysis completes, a chat panel in the sidebar allows free-form follow-up questions. The `analysis-agent` connects to `prom-mcp-server` over HTTP/SSE using the MCP protocol, which exposes three live tools:
+
+| Tool | Description |
+|------|-------------|
+| `prometheus_query` | Instant PromQL query |
+| `prometheus_query_range` | Range PromQL query |
+| `prometheus_list_metrics` | Discover metric names by prefix |
+
+The LLM runs an agentic loop — calling tools as needed until it produces a final answer.
 
 ### Quick start
 
 ```bash
-# locally (Prometheus must be running on localhost:9090)
-cd ai-agent
-pip install -r requirements.txt
-PROMETHEUS_URL=http://localhost:9090 \
-ANTHROPIC_API_KEY=sk-ant-... \
-uvicorn main:app --reload
-# → http://localhost:8000
-
-# or via Docker Compose (spins up alongside the rest of the stack)
+# via Docker Compose (recommended — starts the full stack)
+export HZ_LICENSEKEY=<your-license-key>
 export ANTHROPIC_API_KEY=sk-ant-...
 export OPENAI_API_KEY=sk-...        # optional — for OpenAI models
-docker compose up -d --build ai-agent
+docker compose up -d
 # → http://localhost:8000
+
+# rebuild only the AI services after a code change
+docker compose up -d --build analysis-agent mcp-prometheus
 ```
 
 ### Configuration
 
-| Environment variable | Default | Description |
-|---|---|---|
-| `PROMETHEUS_URL` | `http://localhost:9090` | Prometheus base URL |
-| `ANTHROPIC_API_KEY` | — | Required for Claude models |
-| `OPENAI_API_KEY` | — | Required for OpenAI models |
+| Environment variable | Service | Default | Description |
+|---|---|---|---|
+| `PROMETHEUS_URL` | both | `http://prometheus:9090` | Prometheus base URL |
+| `MCP_SERVER_URL` | analysis-agent | `http://mcp-prometheus:8001` | MCP server URL for follow-up chat |
+| `ANTHROPIC_API_KEY` | analysis-agent | — | Required for Claude models |
+| `OPENAI_API_KEY` | analysis-agent | — | Required for OpenAI models |
 
 ### Available models
 
@@ -621,8 +649,10 @@ docker compose up -d --build ai-agent
 | Claude Sonnet 4.6 | Anthropic |
 | Claude Opus 4.6 | Anthropic |
 | Claude Haiku 4.5 | Anthropic |
-| GPT-4o _(default)_ | OpenAI |
+| GPT-4o | OpenAI |
 | GPT-4o mini | OpenAI |
+
+> Analysis (the Analyse button) supports all models. Follow-up chat supports both Claude and OpenAI models — the model selected in the UI is used for both.
 
 ---
 
