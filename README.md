@@ -77,19 +77,19 @@ CP structures are organised into **CP groups**. Each group is an independent Raf
 │               ┌─────────────────┐                              │
 │               │ Prometheus      │  scrape interval: 15s        │
 │               │ :9090           │  retention: 15d              │
-│               └────┬───────┬───┘                              │
+│               └────┬───────┬───┘                               │
 │                    │       │ PromQL                            │
-│             ┌──────┘  ┌────────────────────┐                  │
+│             ┌──────┘  ┌────────────────────┐                   │
 │             │         │ prom-mcp-server     │                  │
 │    ┌─────────────┐    │ :8001 (MCP/SSE)     │                  │
 │    │ Grafana     │    │ Prometheus tools    │                  │
 │    │ :3000       │    └──────────┬──────────┘                  │
-│    │ 6 dashboards│               │ MCP (SSE)                  │
-│    └─────────────┘    ┌──────────────────┐                    │
-│                       │ analysis-agent   │                    │
-│                       │ :8000            │                    │
-│                       │ UI + LLM + chat  │                    │
-│                       └──────────────────┘                    │
+│    │ 6 dashboards│               │ MCP (SSE)                   │
+│    └─────────────┘    ┌──────────────────┐                     │
+│                       │ analysis-agent   │                     │
+│                       │ :8000            │                     │
+│                       │ UI + LLM + chat  │                     │
+│                       └──────────────────┘                     │
 │                                                                │
 │  ┌──────────────────┐                                          │
 │  │ traffic-generator│  CPMap + FencedLock + ISemaphore +       │
