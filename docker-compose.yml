@@ -136,3 +136,17 @@ services:
       hz1:
         condition: service_healthy
 
+  ai-agent:
+    build: ./ai-agent
+    container_name: ai-agent
+    ports:
+      - "8000:8000"
+    environment:
+      PROMETHEUS_URL: "http://prometheus:9090"
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    networks:
+      - hz-net
+    depends_on:
+      - prometheus
+

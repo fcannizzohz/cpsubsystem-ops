@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CP Subsystem AI Analysis</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0f1117;
+      --surface:   #1a1d27;
+      --border:    #2a2d3a;
+      --accent:    #5b8af5;
+      --accent-h:  #7aa3ff;
+      --text:      #e2e4ed;
+      --muted:     #7a7f96;
+      --ok:        #3fb950;
+      --warn:      #d29922;
+      --crit:      #f85149;
+      --radius:    8px;
+      --font:      'Inter', system-ui, sans-serif;
+      --mono:      'JetBrains Mono', 'Fira Code', monospace;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 14px;
+      line-height: 1.6;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Header ─────────────────────────────────────────────────────── */
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 24px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    header h1 { font-size: 16px; font-weight: 600; letter-spacing: .02em; }
+    header .badge {
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 100px;
+      background: #1f2d4a;
+      color: var(--accent);
+      border: 1px solid #2a3f6b;
+    }
+    #prom-status {
+      margin-left: auto;
+      font-size: 12px;
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    #prom-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--muted);
+    }
+    #prom-dot.ok   { background: var(--ok); }
+    #prom-dot.fail { background: var(--crit); }
+
+    /* ── Main layout ─────────────────────────────────────────────────── */
+    main {
+      flex: 1;
+      max-width: 900px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 28px 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    /* ── Control panel ───────────────────────────────────────────────── */
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+    }
+
+    .control-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+    @media (max-width: 600px) { .control-grid { grid-template-columns: 1fr; } }
+
+    label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; font-weight: 500; }
+
+    .presets {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 10px;
+    }
+    .preset-btn {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 5px;
+      padding: 4px 10px;
+      font-size: 12px;
+      cursor: pointer;
+      transition: border-color .15s, background .15s;
+    }
+    .preset-btn:hover   { border-color: var(--accent); color: var(--accent-h); }
+    .preset-btn.active  { border-color: var(--accent); background: #1a2d54; color: var(--accent-h); }
+
+    .datetime-row { display: flex; gap: 8px; }
+    .datetime-row input {
+      flex: 1;
+      background: #12151f;
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      color: var(--text);
+      padding: 7px 10px;
+      font-size: 13px;
+      font-family: var(--mono);
+      outline: none;
+    }
+    .datetime-row input:focus { border-color: var(--accent); }
+
+    select {
+      width: 100%;
+      background: #12151f;
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      color: var(--text);
+      padding: 8px 10px;
+      font-size: 13px;
+      outline: none;
+    }
+    select:focus { border-color: var(--accent); }
+    select option { background: var(--surface); }
+
+    .actions { display: flex; align-items: center; gap: 12px; margin-top: 18px; }
+
+    #analyse-btn {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 9px 22px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background .15s, opacity .15s;
+    }
+    #analyse-btn:hover    { background: var(--accent-h); }
+    #analyse-btn:disabled { opacity: .5; cursor: not-allowed; }
+
+    #status-msg {
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    /* ── Results ─────────────────────────────────────────────────────── */
+    #results {
+      display: none;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px;
+      min-height: 120px;
+    }
+    #results.visible { display: block; }
+
+    /* Pre-formatted output — used for both streaming and final render */
+    #md-output {
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: var(--font);
+      font-size: 13px;
+      line-height: 1.75;
+      color: var(--text);
+    }
+
+    /* Streaming cursor */
+    #md-output.streaming::after {
+      content: '▋';
+      animation: blink .7s step-end infinite;
+      color: var(--accent);
+    }
+    @keyframes blink { 50% { opacity: 0; } }
+
+    .result-meta {
+      font-size: 11px;
+      color: var(--muted);
+      margin-bottom: 16px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      gap: 16px;
+    }
+
+    .warning-box {
+      background: #2a1f0a;
+      border: 1px solid #5a3f0a;
+      border-radius: 5px;
+      padding: 8px 12px;
+      font-size: 12px;
+      color: #d29922;
+      margin-bottom: 12px;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:#5b8af5"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>
+  <h1>CP Subsystem AI Analysis</h1>
+  <span class="badge">Strategy 2</span>
+  <div id="prom-status">
+    <div id="prom-dot"></div>
+    <span id="prom-label">Prometheus</span>
+  </div>
+</header>
+
+<main>
+  <div class="panel">
+    <div class="control-grid">
+
+      <!-- Time range -->
+      <div>
+        <label>TIME RANGE</label>
+        <div class="presets" id="presets">
+          <button class="preset-btn" data-m="15">15 m</button>
+          <button class="preset-btn" data-m="30">30 m</button>
+          <button class="preset-btn active" data-m="60">1 h</button>
+          <button class="preset-btn" data-m="180">3 h</button>
+          <button class="preset-btn" data-m="360">6 h</button>
+          <button class="preset-btn" data-m="720">12 h</button>
+          <button class="preset-btn" data-m="1440">24 h</button>
+        </div>
+        <label style="margin-top:10px">CUSTOM RANGE</label>
+        <div class="datetime-row">
+          <input type="datetime-local" id="start-input" title="Start" />
+          <input type="datetime-local" id="end-input"   title="End"   />
+        </div>
+      </div>
+
+      <!-- Model -->
+      <div>
+        <label>MODEL</label>
+        <select id="model-select">
+          <option value="">Loading models…</option>
+        </select>
+        <div style="margin-top:12px;font-size:12px;color:var(--muted);line-height:1.5">
+          API keys are read from environment variables:<br>
+          <code>ANTHROPIC_API_KEY</code> · <code>OPENAI_API_KEY</code>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="actions">
+      <button id="analyse-btn">Analyse</button>
+      <span id="status-msg"></span>
+    </div>
+  </div>
+
+  <div id="results">
+    <div class="result-meta" id="result-meta"></div>
+    <div id="warnings"></div>
+    <div id="md-output"></div>
+  </div>
+</main>
+
+<script>
+  // ── Utilities ────────────────────────────────────────────────────────────
+  const toLocalIso = (d) => {
+    const pad = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+
+  // ── Preset buttons ───────────────────────────────────────────────────────
+  let activePreset = 60; // default 1 h
+
+  function applyPreset(minutes) {
+    const end = new Date();
+    const start = new Date(end - minutes * 60_000);
+    document.getElementById('start-input').value = toLocalIso(start);
+    document.getElementById('end-input').value   = toLocalIso(end);
+    activePreset = minutes;
+    document.querySelectorAll('.preset-btn').forEach(b => {
+      b.classList.toggle('active', +b.dataset.m === minutes);
+    });
+  }
+
+  document.getElementById('presets').addEventListener('click', e => {
+    if (e.target.classList.contains('preset-btn')) {
+      applyPreset(+e.target.dataset.m);
+    }
+  });
+
+  // Deactivate preset if user edits custom inputs
+  ['start-input', 'end-input'].forEach(id => {
+    document.getElementById(id).addEventListener('change', () => {
+      activePreset = null;
+      document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
+    });
+  });
+
+  applyPreset(60); // default
+
+  // ── Load models ──────────────────────────────────────────────────────────
+  fetch('/api/models')
+    .then(r => r.json())
+    .then(models => {
+      const sel = document.getElementById('model-select');
+      sel.innerHTML = '';
+      let lastProvider = '';
+      models.forEach(m => {
+        if (m.provider !== lastProvider) {
+          const og = document.createElement('optgroup');
+          og.label = m.provider === 'anthropic' ? 'Anthropic' : 'OpenAI';
+          sel.appendChild(og);
+          lastProvider = m.provider;
+        }
+        const opt = document.createElement('option');
+        opt.value = m.id;
+        opt.textContent = m.label;
+        if (m.default) opt.selected = true;
+        sel.lastChild.appendChild(opt);
+      });
+    });
+
+  // ── Prometheus health ─────────────────────────────────────────────────────
+  async function checkPromHealth() {
+    try {
+      const r = await fetch('/api/health');
+      const d = await r.json();
+      const dot = document.getElementById('prom-dot');
+      const lbl = document.getElementById('prom-label');
+      if (d.prometheus) {
+        dot.className = 'ok';
+        lbl.textContent = 'Prometheus';
+      } else {
+        dot.className = 'fail';
+        lbl.textContent = 'Prometheus unreachable';
+      }
+    } catch {
+      document.getElementById('prom-dot').className = 'fail';
+    }
+  }
+  checkPromHealth();
+  setInterval(checkPromHealth, 15_000);
+
+  // ── Analysis ─────────────────────────────────────────────────────────────
+  let activeSource = null;
+
+  document.getElementById('analyse-btn').addEventListener('click', () => {
+    if (activeSource) { activeSource.close(); activeSource = null; }
+
+    const startVal = document.getElementById('start-input').value;
+    const endVal   = document.getElementById('end-input').value;
+    if (!startVal || !endVal) { setStatus('Set a time range first.'); return; }
+
+    const startTs = new Date(startVal).getTime() / 1000;
+    const endTs   = new Date(endVal).getTime() / 1000;
+    if (endTs <= startTs) { setStatus('End must be after start.'); return; }
+
+    const model = document.getElementById('model-select').value;
+    if (!model) { setStatus('Select a model.'); return; }
+
+    const btn      = document.getElementById('analyse-btn');
+    const results  = document.getElementById('results');
+    const mdOut    = document.getElementById('md-output');
+    const warnings = document.getElementById('warnings');
+    const meta     = document.getElementById('result-meta');
+
+    btn.disabled = true;
+    setStatus('');
+    results.className = 'visible';
+    warnings.innerHTML = '';
+    mdOut.className    = 'streaming';
+    mdOut.textContent  = '';
+
+    const startLabel = new Date(startVal).toLocaleString();
+    const endLabel   = new Date(endVal).toLocaleString();
+    meta.innerHTML = `<span>📅 ${startLabel} → ${endLabel}</span><span>🤖 ${model}</span>`;
+
+    let rawText = '';
+    const url = `/api/analyse?start=${startTs}&end=${endTs}&model=${encodeURIComponent(model)}`;
+    const src = new EventSource(url);
+    activeSource = src;
+
+    // ── default message event — LLM text chunks ──────────────────────────
+    src.onmessage = (e) => {
+      let chunk;
+      try { chunk = JSON.parse(e.data); } catch { chunk = e.data; }
+      rawText += chunk;
+      // Show plain text while streaming; one final markdown render on done
+      mdOut.innerText = rawText;
+    };
+
+    // ── named events ─────────────────────────────────────────────────────
+    src.addEventListener('status', (e) => {
+      let msg; try { msg = JSON.parse(e.data); } catch { msg = e.data; }
+      setStatus(msg);
+    });
+
+    src.addEventListener('warning', (e) => {
+      let msg; try { msg = JSON.parse(e.data); } catch { msg = e.data; }
+      warnings.innerHTML += `<div class="warning-box">⚠️ ${escHtml(msg)}</div>`;
+    });
+
+    src.addEventListener('agent_error', (e) => {
+      let msg; try { msg = JSON.parse(e.data); } catch { msg = e.data; }
+      warnings.innerHTML += `<div class="warning-box" style="background:#2a0a0a;border-color:#5a0a0a;color:#f85149">🔴 ${escHtml(msg)}</div>`;
+      finish();
+    });
+
+    src.addEventListener('done', () => {
+      finish();
+    });
+
+    src.onerror = () => {
+      if (src.readyState === EventSource.CLOSED) finish();
+    };
+
+    function finish() {
+      src.close();
+      activeSource = null;
+      btn.disabled = false;
+      setStatus('');
+      mdOut.classList.remove('streaming');
+    }
+  });
+
+  function setStatus(msg) {
+    document.getElementById('status-msg').textContent = msg;
+  }
+
+  function escHtml(s) {
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+</script>
+</body>
+</html>
