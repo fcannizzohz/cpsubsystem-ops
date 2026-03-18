@@ -136,6 +136,18 @@ services:
       hz1:
         condition: service_healthy
 
+  mcp-prometheus:
+    build: ./mcp-server
+    container_name: mcp-prometheus
+    hostname: mcp-prometheus
+    environment:
+      PROMETHEUS_URL: "http://prometheus:9090"
+      PORT: "8001"
+    networks:
+      - hz-net
+    depends_on:
+      - prometheus
+
   ai-agent:
     build: ./ai-agent
     container_name: ai-agent
@@ -143,10 +155,12 @@ services:
       - "8000:8000"
     environment:
       PROMETHEUS_URL: "http://prometheus:9090"
+      MCP_SERVER_URL: "http://mcp-prometheus:8001"
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     networks:
       - hz-net
     depends_on:
       - prometheus
+      - mcp-prometheus
 

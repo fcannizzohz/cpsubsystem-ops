@@ -229,6 +229,132 @@
       margin-bottom: 10px;
     }
 
+    /* ── Chat ────────────────────────────────────────────────────────── */
+    #chat-section {
+      display: none;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    #chat-section.visible { display: flex; flex-direction: column; }
+
+    #chat-header {
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--border);
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: .04em;
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    #chat-header .mcp-badge {
+      font-size: 10px;
+      padding: 1px 7px;
+      border-radius: 100px;
+      background: #1a2d1a;
+      color: #3fb950;
+      border: 1px solid #2a4a2a;
+    }
+
+    #chat-messages {
+      padding: 14px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      max-height: 480px;
+      overflow-y: auto;
+    }
+
+    .chat-msg {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      max-width: 88%;
+    }
+    .chat-msg.user   { align-self: flex-end; align-items: flex-end; }
+    .chat-msg.assistant { align-self: flex-start; align-items: flex-start; }
+
+    .chat-bubble {
+      padding: 9px 13px;
+      border-radius: 10px;
+      font-size: 13px;
+      line-height: 1.6;
+      word-break: break-word;
+    }
+    .chat-msg.user .chat-bubble {
+      background: var(--accent);
+      color: #fff;
+      border-bottom-right-radius: 3px;
+    }
+    .chat-msg.assistant .chat-bubble {
+      background: #12151f;
+      border: 1px solid var(--border);
+      border-bottom-left-radius: 3px;
+      color: var(--text);
+    }
+    /* Markdown inside assistant bubbles */
+    .chat-bubble h2, .chat-bubble h3 { font-weight: 600; margin: 8px 0 4px; }
+    .chat-bubble p  { margin: 4px 0; }
+    .chat-bubble ul, .chat-bubble ol { padding-left: 18px; margin: 4px 0; }
+    .chat-bubble li { margin: 2px 0; }
+    .chat-bubble strong { color: #fff; }
+    .chat-bubble code {
+      font-family: var(--mono); font-size: 11px;
+      background: #0f1117; padding: 1px 4px; border-radius: 3px;
+    }
+    .chat-bubble table { border-collapse: collapse; width: 100%; margin: 6px 0; font-size: 12px; }
+    .chat-bubble th { background: #0f1117; padding: 5px 10px; text-align: left; border: 1px solid var(--border); color: var(--muted); font-weight: 600; }
+    .chat-bubble td { padding: 5px 10px; border: 1px solid var(--border); }
+
+    .tool-call-pill {
+      font-size: 11px;
+      color: #3fb950;
+      background: #0f1f0f;
+      border: 1px solid #1a3a1a;
+      border-radius: 4px;
+      padding: 3px 8px;
+      font-family: var(--mono);
+      align-self: flex-start;
+    }
+
+    #chat-input-row {
+      display: flex;
+      gap: 8px;
+      padding: 12px 16px;
+      border-top: 1px solid var(--border);
+    }
+    #chat-input {
+      flex: 1;
+      background: #12151f;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      padding: 8px 11px;
+      font-size: 13px;
+      font-family: var(--font);
+      outline: none;
+      resize: none;
+    }
+    #chat-input:focus { border-color: var(--accent); }
+    #chat-send {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 8px 16px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background .15s, opacity .15s;
+      white-space: nowrap;
+      align-self: flex-end;
+    }
+    #chat-send:hover    { background: var(--accent-h); }
+    #chat-send:disabled { opacity: .5; cursor: not-allowed; }
+
     /* ── Markdown output ─────────────────────────────────────────────── */
     #md-output.streaming {
       white-space: pre-wrap;
@@ -315,12 +441,6 @@
         </select>
       </div>
 
-      <div>
-        <label>PROMETHEUS URL</label>
-        <input class="text-input" type="url" id="prom-url"
-               placeholder="http://localhost:9090" spellcheck="false" />
-      </div>
-
       <div class="actions">
         <button id="analyse-btn">Analyse</button>
         <span id="status-msg"></span>
@@ -339,6 +459,20 @@
                   placeholder="e.g. Deployment rolled out 2h ago"
                   rows="2"></textarea>
         <button id="context-add-btn" class="preset-btn" style="white-space:nowrap;padding:7px 12px">Add</button>
+      </div>
+    </div>
+
+    <!-- Chat section — shown after analysis completes -->
+    <div id="chat-section" class="visible">
+      <div id="chat-header">
+        FOLLOW-UP
+        <span class="mcp-badge">MCP · Prometheus tools</span>
+      </div>
+      <div id="chat-messages"></div>
+      <div id="chat-input-row">
+        <textarea id="chat-input" rows="2"
+                  placeholder="Ask a follow-up question… (Enter to send, Shift+Enter for newline)"></textarea>
+        <button id="chat-send">Send</button>
       </div>
     </div>
 
@@ -434,9 +568,10 @@
   applyPreset(60);
 
   // ── Load server config ────────────────────────────────────────────────────
+  let promUrl = '';
   fetch('/api/config')
     .then(r => r.json())
-    .then(cfg => { document.getElementById('prom-url').value = cfg.prometheus_url || ''; })
+    .then(cfg => { promUrl = cfg.prometheus_url || ''; checkPromHealth(); })
     .catch(() => {});
 
   // ── Load models ───────────────────────────────────────────────────────────
@@ -463,10 +598,8 @@
 
   // ── Prometheus health ─────────────────────────────────────────────────────
   async function checkPromHealth() {
-    const url = document.getElementById('prom-url').value.trim();
-    const qs  = url ? `?prometheus_url=${encodeURIComponent(url)}` : '';
     try {
-      const r = await fetch(`/api/health${qs}`);
+      const r = await fetch('/api/health');
       const d = await r.json();
       const dot = document.getElementById('prom-dot');
       const lbl = document.getElementById('prom-label');
@@ -481,14 +614,7 @@
       document.getElementById('prom-dot').className = 'fail';
     }
   }
-  checkPromHealth();
   setInterval(checkPromHealth, 15_000);
-
-  let _healthDebounce;
-  document.getElementById('prom-url').addEventListener('input', () => {
-    clearTimeout(_healthDebounce);
-    _healthDebounce = setTimeout(checkPromHealth, 600);
-  });
 
   // ── Analysis ──────────────────────────────────────────────────────────────
   let activeSource = null;
@@ -506,9 +632,6 @@
 
     const model = document.getElementById('model-select').value;
     if (!model) { setStatus('Select a model.'); return; }
-
-    const promUrl = document.getElementById('prom-url').value.trim();
-    if (!promUrl) { setStatus('Enter a Prometheus URL.'); return; }
 
     const btn      = document.getElementById('analyse-btn');
     const results  = document.getElementById('results');
@@ -568,6 +691,16 @@
     src.addEventListener('done', () => {
       mdOut.classList.remove('streaming');
       mdOut.innerHTML = marked.parse(rawText);
+      // Capture context for follow-up chat
+      analysisText = rawText;
+      analysisMeta = {
+        promUrl: promUrl,
+        model:   model,
+        start:   startTs,
+        end:     endTs,
+      };
+      chatHistory = [];
+      document.getElementById('chat-messages').innerHTML = '';
       finish();
     });
 
@@ -585,6 +718,131 @@
   function setStatus(msg) {
     document.getElementById('status-msg').textContent = msg;
   }
+
+  // ── Chat ──────────────────────────────────────────────────────────────────
+  let analysisText = '';   // captured after analysis completes
+  let analysisMeta = {};   // {start, end, model, promUrl} for the chat request
+  let chatHistory  = [];   // [{role, content}] sent to /api/chat
+  let chatBusy     = false;
+
+  function appendChatMessage(role, content, isStreaming = false) {
+    const list = document.getElementById('chat-messages');
+    const wrap = document.createElement('div');
+    wrap.className = `chat-msg ${role}`;
+    const bubble = document.createElement('div');
+    bubble.className = 'chat-bubble';
+    if (isStreaming) {
+      bubble.textContent = content;
+    } else {
+      bubble.innerHTML = role === 'assistant' ? marked.parse(content) : escHtml(content);
+    }
+    wrap.appendChild(bubble);
+    list.appendChild(wrap);
+    list.scrollTop = list.scrollHeight;
+    return bubble;
+  }
+
+  function appendToolPill(name, input) {
+    const list = document.getElementById('chat-messages');
+    const pill = document.createElement('div');
+    pill.className = 'tool-call-pill';
+    const queryPreview = input.query
+      ? ` · ${input.query.slice(0, 60)}${input.query.length > 60 ? '…' : ''}`
+      : '';
+    pill.textContent = `⚡ ${name}${queryPreview}`;
+    list.appendChild(pill);
+    list.scrollTop = list.scrollHeight;
+  }
+
+  async function sendChatMessage() {
+    if (chatBusy) return;
+    const input = document.getElementById('chat-input');
+    const text  = input.value.trim();
+    if (!text) return;
+
+    input.value = '';
+    chatBusy = true;
+    document.getElementById('chat-send').disabled = true;
+
+    // Add user message to UI and history
+    appendChatMessage('user', text);
+    chatHistory.push({ role: 'user', content: text });
+
+    // Placeholder assistant bubble for streaming
+    const bubble = appendChatMessage('assistant', '', true);
+    let rawText = '';
+
+    try {
+      const resp = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages:       chatHistory,
+          analysis:       analysisText,
+          prometheus_url: analysisMeta.promUrl,
+          start:          analysisMeta.start,
+          end:            analysisMeta.end,
+          model:          analysisMeta.model,
+        }),
+      });
+
+      const reader  = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let   buffer  = '';
+      let   curEvent = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        // Parse SSE lines
+        const lines = buffer.split('\n');
+        buffer = lines.pop(); // keep incomplete last line
+
+        for (const line of lines) {
+          if (line.startsWith('event: ')) {
+            curEvent = line.slice(7).trim();
+          } else if (line.startsWith('data: ')) {
+            let data;
+            try { data = JSON.parse(line.slice(6)); } catch { data = line.slice(6); }
+
+            if (curEvent === 'tool_call') {
+              appendToolPill(data.name, data.input || {});
+              curEvent = '';
+            } else if (curEvent === 'done' || curEvent === 'error') {
+              curEvent = '';
+            } else {
+              // Default: text chunk
+              rawText += data;
+              bubble.textContent = rawText; // streaming plain text
+              document.getElementById('chat-messages').scrollTop =
+                document.getElementById('chat-messages').scrollHeight;
+            }
+          } else if (line === '') {
+            curEvent = '';
+          }
+        }
+      }
+
+      // Render final markdown
+      bubble.innerHTML = marked.parse(rawText);
+      chatHistory.push({ role: 'assistant', content: rawText });
+
+    } catch (err) {
+      bubble.textContent = `Error: ${err.message}`;
+    } finally {
+      chatBusy = false;
+      document.getElementById('chat-send').disabled = false;
+      document.getElementById('chat-messages').scrollTop =
+        document.getElementById('chat-messages').scrollHeight;
+    }
+  }
+
+  document.getElementById('chat-send').addEventListener('click', sendChatMessage);
+  document.getElementById('chat-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChatMessage(); }
+  });
 </script>
 </body>
 </html>

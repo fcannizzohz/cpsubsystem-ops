@@ -16,11 +16,12 @@ import os
 from datetime import datetime, timezone
 from typing import Annotated
 
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from analysis import build_context, summarise_instant, summarise_range
+from chat import chat_stream
 from cluster import derive_context
 from llm import AVAILABLE_MODELS, analyse
 from prom import PrometheusClient, choose_step
@@ -187,6 +188,34 @@ async def analyse_endpoint(
 
     return StreamingResponse(
         event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.post("/api/chat")
+async def chat_endpoint(request: Request):
+    """
+    Agentic follow-up chat with live Prometheus tool access.
+    Accepts JSON body:
+      messages        — chat history [{role, content}, ...]
+      analysis        — completed analysis text
+      prometheus_url  — Prometheus base URL
+      start           — original analysis window start (Unix timestamp)
+      end             — original analysis window end   (Unix timestamp)
+      model           — LLM model id (must be a Claude model)
+    Streams SSE: text chunks (default event) + tool_call / done / error events.
+    """
+    body = await request.json()
+    messages       = body.get("messages", [])
+    analysis       = body.get("analysis", "")
+    prometheus_url = body.get("prometheus_url", PROMETHEUS_URL)
+    start          = float(body.get("start", 0))
+    end            = float(body.get("end", 0))
+    model          = body.get("model", "claude-sonnet-4-6")
+
+    return StreamingResponse(
+        chat_stream(messages, analysis, prometheus_url, start, end, model),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

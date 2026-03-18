@@ -116,12 +116,6 @@ INSTANT_QUERIES: list[InstantQuery] = [
         description="Current value of each IAtomicLong counter",
         healthy_hint="Monotonically increasing under load; use rate for throughput signal",
     ),
-    InstantQuery(
-        name="lock_acquire_rate",
-        query="rate(hz_cp_lock_acquireCount[5m])",
-        description="FencedLock acquisition rate at end of window (5-minute trailing rate)",
-        healthy_hint="Non-zero = locks are being acquired; zero = no lock activity",
-    ),
 ]
 
 

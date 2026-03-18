@@ -40,6 +40,21 @@ class PrometheusClient:
             raise RuntimeError(f"Prometheus range query failed: {data}")
         return data["data"]["result"]
 
+    async def label_values(self, label: str, match: str | None = None) -> list[str]:
+        """Return all values for a label (e.g. __name__ for metric discovery)."""
+        params: dict = {}
+        if match:
+            params["match[]"] = match
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            r = await client.get(
+                f"{self.base_url}/api/v1/label/{label}/values", params=params
+            )
+            r.raise_for_status()
+        data = r.json()
+        if data["status"] != "success":
+            raise RuntimeError(f"Prometheus label_values failed: {data}")
+        return sorted(data.get("data", []))
+
     async def health(self) -> bool:
         """Return True if Prometheus is reachable."""
         try:

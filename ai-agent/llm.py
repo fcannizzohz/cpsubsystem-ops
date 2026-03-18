@@ -72,7 +72,6 @@ Rules:
 ### Data structure instant metrics (labelled by `name`)
 - `semaphore_available`   — current available permits per ISemaphore
 - `lock_hold_count`       — current concurrent holders per FencedLock
-- `lock_acquire_rate`     — FencedLock acquisition rate at snapshot (5-min trailing rate)
 - `atomiclong_values`     — current value per IAtomicLong counter
 
 ### Time-series (range) summaries (recent ~5–15 minutes)
