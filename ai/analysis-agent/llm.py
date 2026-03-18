@@ -53,8 +53,9 @@ Rules:
 ## Metrics Snapshot
 
 ### Cluster-level instant metrics
-- `reachable_cp_members`
-- `missing_cp_members`
+- `reporting_members`      — members currently sending metrics to MC (most reliable signal)
+- `reachable_cp_members`  — self-reported by CP subsystem (may lag after a crash)
+- `missing_cp_members`    — self-reported by CP subsystem (may lag after a crash)
 - `total_cp_groups`
 - `terminated_raft_groups`
 - `raft_nodes_per_member`
@@ -98,15 +99,22 @@ Use Cluster Context values:
 - expected members = `cp_member_count`
 - quorum = `quorum_size`
 
-Evaluate:
-- `reachable_cp_members`:
-  - equals expected → healthy
-  - ≥ quorum but < expected → degraded
-  - < quorum → critical (quorum loss risk)
+**Primary signal — `reporting_members`** (count of members actively sending metrics):
+- Check this FIRST. It reflects the ground truth immediately when a member crashes,
+  before the CP subsystem has had time to update its own counters.
+- equals `cp_member_count` → all members up
+- < `cp_member_count` → one or more members silent; treat as 🔴 regardless of
+  what `reachable_cp_members` says
 
-- `missing_cp_members`:
-  - 0 → healthy
-  - >0 → warning
+**Secondary signals — `reachable_cp_members` and `missing_cp_members`**:
+- These are self-reported by the CP subsystem and can lag by seconds to minutes
+  after a hard crash. Use them to confirm but do NOT rely on them alone.
+- `reachable_cp_members` < quorum → critical (quorum loss risk)
+- `missing_cp_members` > 0 → warning or critical depending on count
+
+**Conflict rule**: if `reporting_members` < `cp_member_count` but
+`reachable_cp_members` == `cp_member_count`, flag this explicitly as:
+"CP subsystem has not yet detected the missing member — metric lag suspected."
 
 - Uneven `raft_nodes_per_member` → load imbalance
 

@@ -161,13 +161,13 @@ async def _query_range(promql: str, start: float, end: float, step: str) -> list
 
 
 async def _list_metrics(prefix: str) -> list[str]:
-    params: dict = {}
-    if prefix:
-        params["match[]"] = f'{{{__name__}=~"{prefix}.*"}}'
+    # Fetch all metric names; filter in Python.
+    # Note: the match[] selector is intentionally omitted — constructing
+    # {__name__=~"..."} in an f-string is error-prone and the full name list
+    # is small enough (~hundreds of metrics) that server-side filtering adds
+    # no meaningful benefit.
     async with httpx.AsyncClient(timeout=30.0) as client:
-        r = await client.get(
-            f"{PROMETHEUS_URL}/api/v1/label/__name__/values", params=params
-        )
+        r = await client.get(f"{PROMETHEUS_URL}/api/v1/label/__name__/values")
         r.raise_for_status()
     data = r.json()
     if data["status"] != "success":

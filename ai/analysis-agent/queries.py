@@ -32,15 +32,21 @@ class RangeQuery:
 
 INSTANT_QUERIES: list[InstantQuery] = [
     InstantQuery(
+        name="reporting_members",
+        query="count(count by (mc_member)(hz_raft_group_term))",
+        description="Members actively sending metrics to Management Center right now",
+        healthy_hint="Must equal cp_member_count; any shortfall = a member is silent (likely down)",
+    ),
+    InstantQuery(
         name="reachable_cp_members",
         query="max(hz_raft_metadata_activeMembers) - max(hz_raft_missingMembers)",
-        description="Reachable CP members right now",
+        description="Reachable CP members per CP subsystem self-report (may lag after a crash)",
         healthy_hint="5 for a 5-node cluster; < 3 risks quorum loss",
     ),
     InstantQuery(
         name="missing_cp_members",
         query="max(hz_raft_missingMembers)",
-        description="CP members currently unreachable",
+        description="CP members flagged unreachable by the CP subsystem (may lag after a crash)",
         healthy_hint="0; any value > 0 is a warning",
     ),
     InstantQuery(
