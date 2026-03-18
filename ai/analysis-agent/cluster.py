@@ -31,6 +31,7 @@ STATIC_CONTEXT: dict = {
         "semaphore":  ["group3", "group7"],
         "counter":    ["group4", "group6"],
     },
+    "cp_map_max_size_mb": 20,
 }
 
 

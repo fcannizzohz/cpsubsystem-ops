@@ -63,30 +63,53 @@ Rules:
 ### Per-group instant metrics (labelled by `name`)
 - `group_member_counts`
 - `available_log_capacity`
+- `uncommitted_entries`   — lastLogIndex - commitIndex (leading write-pressure indicator)
+- `snapshot_lag`          — lastLogIndex - snapshotIndex (entries since last snapshot)
 - `commit_lag_current`
 - `raft_terms`
+
+### Member resource instant metrics (labelled by `mc_member`)
+- `member_heap_used_pct`  — JVM heap utilisation % per member
+- `member_cpu`            — process CPU utilisation % per member
+- `member_uptime_ms`      — JVM uptime in milliseconds (low value = recent restart)
 
 ### CPMap metrics (subset of groups)
 - `cp_map_sizes`
 - `cp_map_storage_bytes`
+- `cp_map_utilization_pct` — storage % of configured 20 MB limit per map
 
 ### Data structure instant metrics (labelled by `name`)
 - `semaphore_available`   — current available permits per ISemaphore
 - `lock_hold_count`       — current concurrent holders per FencedLock
+- `lock_acquire_limit`    — configured reentrancy limit per FencedLock
+- `lock_owner_session`    — session ID of current lock owner (0 = no owner)
 - `atomiclong_values`     — current value per IAtomicLong counter
+- `session_expiry_snapshot` — expiration epoch ms per active CP session
+
+### CP object lifecycle instant metrics
+- `locks_destroyed`       — cumulative destroyed FencedLock instances
+- `semaphores_destroyed`  — cumulative destroyed ISemaphore instances
+- `atomiclong_destroyed`  — cumulative destroyed IAtomicLong instances
 
 ### Time-series (range) summaries (recent ~5–15 minutes)
 - `leader_elections`
 - `commit_lag_over_time`
+- `follower_lag_per_member` — per-member gap between cluster-max commitIndex and member's lastApplied
+- `uncommitted_entries_over_time`
 - `commit_rate`
 - `apply_rate`
 - `missing_members_over_time`
 - `log_capacity_over_time`
+- `snapshot_index_over_time`
+- `member_heap_over_time`
+- `member_cpu_over_time`
+- `member_uptime_over_time`
 - `cp_map_entry_trend`
 - `semaphore_permits_over_time`
 - `lock_acquire_rate`
 - `atomiclong_increment_rate`
 - `session_heartbeat_rate`
+- `cp_object_churn`       — cumulative destroyed CP objects over time
 
 Assume:
 - Values are pre-aggregated as defined by queries.
@@ -126,6 +149,13 @@ Use `group_size` from Cluster Context.
   - == group_size - 1 → degraded
   - ≤1 → unavailable
 
+- `uncommitted_entries` (instant) and `uncommitted_entries_over_time` (range):
+  - 0–10 → healthy
+  - 10–50 → mild write pressure
+  - 50–150 → warning (approaching saturation)
+  - ≥200 → critical (leader will start rejecting new writes)
+  - Rising trend in range = write saturation building
+
 - `commit_lag_current`:
   - 0–10 → healthy
   - 10–100 → warning
@@ -137,11 +167,52 @@ Use `group_size` from Cluster Context.
     (high `max` relative to `min` in the range summary) as evidence of elections.
   - A flat term across the window → no elections occurred.
 
+- `follower_lag_per_member` (range):
+  - 0 = fully caught up
+  - Sustained > 0 on a specific member = that member is falling behind
+  - Cross-reference with `member_heap_over_time` and `member_cpu_over_time` to find root cause
+
 ### Log health
 - `available_log_capacity`:
   - >1000 → healthy
   - <1000 → warning
   - 0 → critical (writes blocked)
+
+- `snapshot_lag` (instant) and `snapshot_index_over_time` (range):
+  - `snapshot_lag` < 10 000 → healthy (snapshot due soon or recently taken)
+  - `snapshot_lag` approaching 10 000 → snapshot expected; check `snapshot_index_over_time`
+  - `snapshot_index_over_time` flat over long window → no snapshots = log exhaustion risk
+  - Combine with `log_capacity_over_time`: falling capacity + no snapshot step = critical
+
+### Member resource health (evaluate EACH member)
+
+- `member_heap_used_pct`:
+  - < 70 % → healthy
+  - 70–85 % → warning (GC pressure)
+  - > 85 % → critical (GC pauses → heartbeat misses → election risk)
+  - Use `member_heap_over_time` for trend: sudden drop after high value = GC event
+
+- `member_cpu`:
+  - < 70 % → healthy
+  - 70–80 % → warning
+  - > 80 % → critical (heartbeat timeout risk)
+  - Correlate spikes with `leader_elections`: CPU spike + election = resource-driven instability
+
+- `member_uptime_ms`:
+  - Value < 300 000 ms (5 min) relative to peers → member restarted recently
+  - Use `member_uptime_over_time`: sudden reset to near 0 = restart during the window
+  - Identify the restarted member; cross-reference with missing_members and elections
+
+### CPMap capacity health
+
+Use `cp_map_max_size_mb` from Cluster Context (default 20 MB per map).
+
+- `cp_map_utilization_pct`:
+  - < 70 % → healthy
+  - 70–80 % → warning (approaching limit)
+  - 80–95 % → critical (writes will be rejected soon)
+  - > 95 % → critical (writes likely already failing)
+  - Combine with `cp_map_entry_trend`: growing entry count + high utilization = imminent rejection risk
 
 ### Data structure health
 
@@ -157,14 +228,20 @@ Use `group_size` from Cluster Context.
   - drops to 0 and recovers → healthy burst cycle
   - sustained at 0 → contention problem; clients may be stalling
 
-**FencedLock** (`lock_hold_count`, `lock_acquire_rate`):
+**FencedLock** (`lock_hold_count`, `lock_acquire_limit`, `lock_owner_session`, `lock_acquire_rate`):
 - `lock_hold_count`:
   - 0 → idle
-  - 1 → one holder (expected; FencedLock is non-reentrant)
+  - 1 → one holder (expected; FencedLock is non-reentrant by default)
   - persistently >0 → lock may be stuck or hold time is very long
-- `lock_acquire_rate`:
-  - proportional to workload throughput
+- `lock_acquire_limit`: reentrancy depth limit. Cross-reference with `lock_hold_count`:
+  - if `lock_hold_count` == `lock_acquire_limit` → lock is at max reentrant depth
+- `lock_owner_session`: non-zero = lock is currently held.
+  - Cross-reference with `session_expiry_snapshot` for the same session:
+    if the owning session is near expiry → lock may be released unexpectedly
+  - If owner session has already expired → lock is in an inconsistent state
+- `lock_acquire_rate` (state changes/min; each acquire+release = 2 changes):
   - zero over the window → no lock activity
+  - non-zero → lock is being used (divide by 2 to approximate acquisitions/min)
   - spikes → burst or contention episode
 
 **IAtomicLong** (`atomiclong_values`, `atomiclong_increment_rate`):
@@ -175,12 +252,29 @@ Use `group_size` from Cluster Context.
   - zero → no counter activity in the window
   - spikes → bursty increment workload
 
-**CP Sessions** (`session_heartbeat_rate`):
+**CP Sessions** (`session_heartbeat_rate`, `session_expiry_snapshot`):
 - `session_heartbeat_rate` reflects how frequently session version increments
   (heartbeats from connected clients).
-- non-zero → sessions are alive and heartbeating
-- drops to 0 → no active sessions, or clients have disconnected / crashed
-- sustained low rate with active data-structure traffic → session TTL risk
+  - non-zero → sessions are alive and heartbeating
+  - drops to 0 → no active sessions, or clients have disconnected / crashed
+  - sustained low rate with active data-structure traffic → session TTL risk
+- `session_expiry_snapshot`: epoch ms when each session expires.
+  - Compare each value to the analysis end timestamp (in ms).
+  - Sessions expiring within 60 000 ms (1 TTL interval) of the analysis end = imminent expiry risk.
+  - If such sessions own FencedLocks (`lock_owner_session` match) or hold semaphore permits,
+    their release will be unexpected and may unblock waiting clients.
+  - If a session expiry time is in the past → session has already expired; any held locks
+    or permits have been force-released.
+
+### CP object lifecycle health
+
+- `locks_destroyed`, `semaphores_destroyed`, `atomiclong_destroyed` (instant):
+  - 0 → healthy (CP objects are long-lived by design)
+  - Any non-zero → objects have been destroyed (investigate why)
+- `cp_object_churn` (range):
+  - Flat line → no destruction (expected)
+  - Rising → objects are being repeatedly created and destroyed (anti-pattern);
+    adds Raft overhead and increases log pressure
 
 ### Cluster group count
 - Compare `total_cp_groups` against `len(cp_groups)` from Cluster Context.
@@ -233,9 +327,37 @@ Use `spike_count` (values > mean + 2σ) and `trend` (stable/rising/falling) for 
   - sustained gap → backlog forming
   - widening gap → worsening condition
 
+- `uncommitted_entries_over_time`:
+  - near 0 → healthy
+  - rising trend → write saturation building; flag if approaching 200
+  - spike + recovery → transient burst, acceptable
+
+- `follower_lag_per_member`:
+  - 0 across all members → fully caught up
+  - non-zero on one member → that member is falling behind (correlate with resource metrics)
+  - non-zero on multiple members → systemic apply issue
+
+- `snapshot_index_over_time`:
+  - regular step-ups → snapshots occurring normally
+  - flat over > 10 min window → no snapshots (critical if combined with falling log capacity)
+
+- `member_heap_over_time`:
+  - stable → healthy
+  - gradual growth → possible memory leak
+  - near-max then sudden drop → GC event; correlate with elections
+  - sustained high → GC pressure = election risk
+
+- `member_uptime_over_time`:
+  - monotonically increasing → stable
+  - sudden drop toward 0 → member restart; identify which member and when
+
 - `cp_map_entry_trend`:
   - steady growth → expected (if workload matches)
   - sudden drop → possible eviction or destroy
+
+- `cp_object_churn`:
+  - flat → healthy (expected; CP objects are long-lived)
+  - rising → repeated creation/destruction (anti-pattern, Raft overhead)
 
 ## Correlation rules
 Only conclude when supported by multiple metrics:
@@ -244,17 +366,24 @@ Only conclude when supported by multiple metrics:
 - Stable leadership + rising lag → apply issue, not Raft instability
 - Elections + missing members → cluster instability
 - Falling log capacity without reset + steady commit rate → snapshotting not keeping up
+- `snapshot_lag` near 10 000 + `snapshot_index_over_time` flat + falling `log_capacity_over_time` → snapshots stalled, log exhaustion imminent
+- `uncommitted_entries` rising + `commit_rate` high → write saturation; if sustained near 200 = writes being rejected
+- High `member_heap_used_pct` or `member_cpu` + elections + `follower_lag_per_member` on same member → resource-driven instability
+- `member_uptime_ms` reset + elections + `missing_members_over_time` spike = same event: member restarted
 - `semaphore_available` == 0 + high `lock_acquire_rate` + rising `commit_lag` → data-structure contention amplifying Raft pressure
 - `session_heartbeat_rate` == 0 + active lock/semaphore usage → session expiry risk; data structures may become inaccessible
 - `lock_hold_count` persistently > 0 + `lock_acquire_rate` spike → lock not being released (possible client crash or deadlock)
+- `lock_owner_session` non-zero + matching session near expiry in `session_expiry_snapshot` → lock will be force-released at session expiry
+- `cp_map_utilization_pct` > 80 % + rising `cp_map_entry_trend` → CPMap nearing capacity; writes will be rejected
+- Rising `cp_object_churn` + increasing Raft `commit_rate` → object churn adding Raft log pressure
 
 Do NOT infer causes without supporting metric combinations.
 
 ## Workload interpretation
 Use Cluster Context `group_roles` to map metric labels to workload types:
-- CPMap groups → interpret via `cp_map_sizes`, `cp_map_storage_bytes`, `cp_map_entry_trend`
+- CPMap groups → interpret via `cp_map_sizes`, `cp_map_storage_bytes`, `cp_map_utilization_pct`, `cp_map_entry_trend`
 - Semaphore groups → interpret via `semaphore_available`, `semaphore_permits_over_time`
-- Lock groups → interpret via `lock_hold_count`, `lock_acquire_rate`
+- Lock groups → interpret via `lock_hold_count`, `lock_acquire_limit`, `lock_owner_session`, `lock_acquire_rate`
 - Counter groups → interpret via `atomiclong_values`, `atomiclong_increment_rate`
 
 Use workload roles only to explain behaviour already supported by metrics.
@@ -296,6 +425,7 @@ One or two sentences stating overall health and the most important observation.
 | Cluster Membership | ✅ / ⚠️ / 🔴 | … |
 | Raft Consensus | ✅ / ⚠️ / 🔴 | … |
 | Log Health | ✅ / ⚠️ / 🔴 | … |
+| Member Health | ✅ / ⚠️ / 🔴 | heap %, CPU %, restarts |
 | CP Maps | ✅ / ⚠️ / 🔴 | … |
 | Data Structures | ✅ / ⚠️ / 🔴 | semaphore permits, lock activity, counter throughput, session health |
 
