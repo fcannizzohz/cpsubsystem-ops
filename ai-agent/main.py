@@ -69,11 +69,18 @@ async def models():
     return AVAILABLE_MODELS
 
 
+@app.get("/api/config")
+async def config():
+    return {"prometheus_url": PROMETHEUS_URL}
+
+
 @app.get("/api/health")
-async def health():
-    prom = PrometheusClient(PROMETHEUS_URL)
+async def health(
+    prometheus_url: Annotated[str, Query()] = PROMETHEUS_URL,
+):
+    prom = PrometheusClient(prometheus_url)
     ok = await prom.health()
-    return {"prometheus": ok, "prometheus_url": PROMETHEUS_URL}
+    return {"prometheus": ok, "prometheus_url": prometheus_url}
 
 
 @app.get("/api/analyse")
