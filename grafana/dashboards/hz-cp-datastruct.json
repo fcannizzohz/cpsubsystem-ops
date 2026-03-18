@@ -632,13 +632,50 @@
       }
     },
     {
+      "id": 20,
+      "type": "timeseries",
+      "title": "Permit Utilisation Ratio",
+      "description": "Fraction of permits currently in use: (max_observed − available) / max_observed. 0 = all permits free, 1 = all permits acquired (pool exhausted). Uses the 1-hour observed maximum as the denominator — accurate once the semaphore has been fully acquired at least once.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 0, "y": 41, "w": 24, "h": 8 },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "1 - (hz_cp_semaphore_available{mc_cluster=\"$cluster\"} / clamp_min(max_over_time(hz_cp_semaphore_available{mc_cluster=\"$cluster\"}[1h]), 1))",
+          "legendFormat": "{{name}}",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "tooltip": { "mode": "multi" },
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max", "mean"] }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "lineWidth": 2, "fillOpacity": 15 },
+          "min": 0,
+          "max": 1,
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.7 },
+              { "color": "red", "value": 0.95 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
       "id": 14,
       "type": "row",
       "title": "IAtomicLong",
       "collapsed": false,
       "gridPos": {
         "x": 0,
-        "y": 41,
+        "y": 50,
         "w": 24,
         "h": 1
       },
@@ -655,7 +692,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 42,
+        "y": 51,
         "w": 12,
         "h": 8
       },
@@ -707,7 +744,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 42,
+        "y": 51,
         "w": 12,
         "h": 8
       },
@@ -754,7 +791,7 @@
       "collapsed": false,
       "gridPos": {
         "x": 0,
-        "y": 50,
+        "y": 59,
         "w": 24,
         "h": 1
       },
@@ -771,7 +808,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 51,
+        "y": 60,
         "w": 12,
         "h": 8
       },
@@ -823,7 +860,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 51,
+        "y": 60,
         "w": 12,
         "h": 8
       },
@@ -854,6 +891,42 @@
           "options": {}
         }
       ]
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "Session Heartbeat Rate",
+      "description": "Rate of CP session heartbeat increments per second (derived from hz_cp_session_version). A healthy session heartbeats every 5 s (≈ 0.2 hz). Rate dropping to 0 means the client has stopped heartbeating — the session will expire in ≤ 60 s (session-time-to-live), releasing any FencedLocks or ISemaphore permits it holds.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 0, "y": 68, "w": 24, "h": 8 },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "rate(hz_cp_session_version{mc_cluster=\"$cluster\"}[30s])",
+          "legendFormat": "session {{id}} / {{mc_member}}",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "tooltip": { "mode": "multi" },
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "min"] }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "lineWidth": 2, "fillOpacity": 8 },
+          "min": 0,
+          "unit": "hertz",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 0.1 }
+            ]
+          },
+          "color": { "mode": "thresholds" }
+        },
+        "overrides": []
+      }
     }
   ]
 }

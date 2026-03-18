@@ -17,7 +17,8 @@ A self-contained Docker Compose environment for running, load-testing, and monit
 9. [Available Metrics](#available-metrics)
 10. [Dashboards](#dashboards)
 11. [Alerting Rules](#alerting-rules)
-12. [TODO](#todo)
+12. [AI Analysis Agent](#ai-analysis-agent)
+13. [TODO](#todo)
 
 ---
 
@@ -441,6 +442,7 @@ Deep dive into Raft consensus mechanics. Use this when diagnosing slow writes, r
 | Log Entries Since Snapshot | `lastLogIndex − snapshotIndex` | Approaches 10 000 (commit-index-advance-count-to-snapshot) before next snapshot |
 | Snapshot Index | `hz_raft_group_snapshotIndex` | Steps up periodically; long flat = no snapshots taken (log growing unbounded) |
 | Available Log Capacity | `hz_raft_group_availableLogCapacity` | Gauge: approaches 0 as log fills. Writes rejected at 0 |
+| **Uncommitted Entries** | `lastLogIndex − commitIndex` | Entries written but not yet committed by a quorum. Approaches 200 → leader starts rejecting writes. green < 50, red ≥ 150 |
 
 #### Row: Leadership
 
@@ -450,6 +452,13 @@ Deep dive into Raft consensus mechanics. Use this when diagnosing slow writes, r
 | Raft Term | `hz_raft_group_term` | Flat = stable. Step = election |
 | Election Frequency | `changes(hz_raft_group_term[$__interval])` | Any non-zero = election occurred in that window |
 | Raft Leader per CP Group | State timeline of `hz_raft_group_term{role="LEADER"}` | Track which member leads each group; transitions = elections |
+
+#### Row: Follower Catch-up
+
+| Panel | Metric | What to watch |
+|-------|--------|---------------|
+| **Follower Catch-up Lag** | `max(commitIndex) − lastApplied` per member | Near 0 for leader and healthy followers; spikes when a follower restarts — watch it converge back to 0 |
+| **Leader Distribution** | `count by (mc_member)(term{role="LEADER"})` stacked | How many groups each member leads. Should be ~1–2 each; one member holding all = others are down |
 
 ---
 
@@ -533,7 +542,11 @@ Lock acquisition rate per lock (`lock0`–`lock2` in `group2`). High and sustain
 
 #### Row: ISemaphore
 
-Available permits over time (`sem0`–`sem2` across `group3`, `group7`). Permits touching 0 and recovering = healthy load. Staying at 0 = overloaded.
+| Panel | Metric | What to watch |
+|-------|--------|---------------|
+| Available Permits | `hz_cp_semaphore_available` | Permits remaining; 0 = all acquired, clients will block |
+| Permit Drain Events | `hz_cp_semaphore_available == bool 0` | 1 when drained, 0 otherwise — frequency shows how often the pool exhausts |
+| **Permit Utilisation Ratio** | `1 − available / max_over_time(available[1h])` | 0–100 %. yellow ≥ 70 %, red ≥ 95 % — shows pool saturation relative to configured capacity |
 
 #### Row: IAtomicLong
 
@@ -545,6 +558,7 @@ Counter values over time (`counter0`–`counter4` across `group4`, `group6`). Sl
 |-------|---------------|
 | Session Heartbeat Version | Step-counter per session. Flatline = session stopped heartbeating → expiry in ≤ 60 s |
 | Session Expiry Table | All active sessions with their expiration time. Sessions close to expiry with no recent heartbeat = potential stuck client |
+| **Session Heartbeat Rate** | `rate(hz_cp_session_version[30s])` — healthy ≈ 0.2 hz (one heartbeat per 5 s). Drops to 0 → session will expire within the TTL (60 s), releasing any locks or semaphore permits it holds |
 
 ---
 
@@ -560,6 +574,55 @@ Defined in [prometheus/rules/cp-subsystem.yml](prometheus/rules/cp-subsystem.yml
 | `CPGroupHighCommitLag` | `hz:cp_group:commit_lag > 100` for 1 m | warning | A follower is significantly behind the leader |
 
 > **Note:** The recording rules in `cp-subsystem.yml` still reference the non-existent V2 names (`hazelcast_raft_*`). They need to be updated to use the actual V1 names (`hz_raft_*`).
+
+---
+
+## AI Analysis Agent
+
+[ai-agent/](ai-agent/) is a FastAPI service that queries Prometheus directly, summarises the metric data, and streams an LLM-generated health analysis back to a browser UI (Strategy 2 — Prometheus → LLM).
+
+### How it works
+
+1. On request the agent runs **11 instant queries** (current state snapshot) and **7 range queries** (time-series over the chosen window) against Prometheus in parallel.
+2. Each time-series is summarised server-side into `{min, max, avg, latest, trend, spike_count}` — no raw arrays are sent to the model.
+3. The compact context block is streamed to the selected model with an SRE-focused system prompt that knows the cluster topology and healthy-value baselines.
+4. The response streams back via Server-Sent Events and renders in the browser.
+
+### Quick start
+
+```bash
+# locally (Prometheus must be running on localhost:9090)
+cd ai-agent
+pip install -r requirements.txt
+PROMETHEUS_URL=http://localhost:9090 \
+ANTHROPIC_API_KEY=sk-ant-... \
+uvicorn main:app --reload
+# → http://localhost:8000
+
+# or via Docker Compose (spins up alongside the rest of the stack)
+export ANTHROPIC_API_KEY=sk-ant-...
+export OPENAI_API_KEY=sk-...        # optional — for OpenAI models
+docker compose up -d --build ai-agent
+# → http://localhost:8000
+```
+
+### Configuration
+
+| Environment variable | Default | Description |
+|---|---|---|
+| `PROMETHEUS_URL` | `http://localhost:9090` | Prometheus base URL |
+| `ANTHROPIC_API_KEY` | — | Required for Claude models |
+| `OPENAI_API_KEY` | — | Required for OpenAI models |
+
+### Available models
+
+| Model | Provider |
+|---|---|
+| Claude Sonnet 4.6 | Anthropic |
+| Claude Opus 4.6 | Anthropic |
+| Claude Haiku 4.5 | Anthropic |
+| GPT-4o _(default)_ | OpenAI |
+| GPT-4o mini | OpenAI |
 
 ---
 

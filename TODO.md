@@ -22,10 +22,7 @@ Items marked **[no metric]** require either a new data structure in the traffic 
 ### Raft Consensus
 
 - [ ] **Append request backoff count** — number of times the leader backed off appending entries to followers (indicator of follower pressure). Metric: `hz_raft_group_appendRequestBackoffCount` — not yet confirmed to exist in MC exports.
-- [ ] **Uncommitted entry count** — entries written to the leader log but not yet committed. When this approaches `uncommitted-entry-count-to-reject-new-appends` (200), new writes will be rejected. `[no metric confirmed]`
 - [ ] **Raft snapshot size** — size in bytes of the last Raft snapshot per group. Large snapshots slow down follower catch-up. `[no metric confirmed]`
-- [ ] **Follower catch-up progress** — when a follower restarts and must replay the log (or load a snapshot), track how far behind it is and how quickly it catches up. `[metric exists — derive from lastApplied lag vs leader]`
-- [ ] **Leader stability heatmap** — a heatmap showing which member holds leadership across all groups over time (requires Grafana transformation to pivot leader identity into a numeric series). `[metric exists]`
 
 ### Lock Contention
 
@@ -37,13 +34,10 @@ Items marked **[no metric]** require either a new data structure in the traffic 
 ### Semaphore
 
 - [ ] **Semaphore acquire wait time** — time spent waiting for a permit. `[no metric confirmed]`
-- [ ] **Semaphore drain events** — how often available permits hit 0. `[derive from hz_cp_semaphore_available]`
-- [ ] **Permit utilisation ratio** — `(configured_permits − available) / configured_permits`. Shows how loaded the semaphore pool is. `[metric exists]`
 
 ### CP Sessions
 
 - [ ] **Active session count** — total live CP sessions at any point. A growing count with no corresponding data structure activity indicates session leaks. `[no metric confirmed]`
-- [ ] **Session heartbeat age** — time since the last heartbeat for each session. Sessions close to TTL without recent heartbeats are at risk of expiry. `[derive from hz_cp_session_version staleness]`
 - [ ] **Session expiry rate** — how often sessions expire. Frequent expiry = clients not heartbeating (GC pauses, network issues, bugs). `[no metric confirmed]`
 
 ### IAtomicLong / IAtomicReference
@@ -54,7 +48,6 @@ Items marked **[no metric]** require either a new data structure in the traffic 
 ### CP Map
 
 - [ ] **CPMap operation latency** — p50/p99 latency for get/set/remove per map. Available in MC but not currently exposed via Prometheus. `[no metric confirmed]`
-- [ ] **Per-key access distribution** — hot key detection. Not natively available via Prometheus; would require application-level instrumentation.
 
 ---
 
@@ -64,7 +57,6 @@ Items marked **[no metric]** require either a new data structure in the traffic 
 - [ ] **Alertmanager integration** — route CP alerts to Slack/PagerDuty. Currently Prometheus has alerting rules but no Alertmanager configured.
 - [ ] **Prometheus remote write** — forward metrics to a long-term storage backend (Thanos, Cortex, Mimir) for retention beyond 15 days.
 - [ ] **Multi-cluster support** — parameterise the Prometheus scrape config to support multiple MC endpoints, each tagged with a different `mc_cluster` label. All dashboards already support the `$cluster` variable.
-- [ ] **Member-level Prometheus scraping** — scrape each `hz1:5701/metrics` … `hz5:5701/metrics` directly (requires enabling the `METRICS` endpoint group — removed in HZ 5.6; use JMX exporter or the new metrics REST endpoint instead). This allows per-member alerting independent of MC availability.
 - [ ] **MC availability alert** — alert when the Management Center itself is unreachable (currently the scrape target going down silently starves all dashboards of data).
 - [ ] **Traffic generator: configurable contention scenarios** — add env vars to tune lock hold time, semaphore permit count, and CAS contention level to simulate specific failure modes.
 - [ ] **Chaos mode** — add a script that stops/starts individual HZ members on a schedule to observe leader re-election and quorum recovery in the dashboards.
