@@ -3,7 +3,11 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
   <title>CP Subsystem AI Analysis</title>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -175,8 +179,8 @@
     }
     #results.visible { display: block; }
 
-    /* Pre-formatted output — used for both streaming and final render */
-    #md-output {
+    /* Streaming phase — plain text */
+    #md-output.streaming {
       white-space: pre-wrap;
       word-break: break-word;
       font-family: var(--font);
@@ -184,14 +188,39 @@
       line-height: 1.75;
       color: var(--text);
     }
-
-    /* Streaming cursor */
     #md-output.streaming::after {
       content: '▋';
       animation: blink .7s step-end infinite;
       color: var(--accent);
     }
     @keyframes blink { 50% { opacity: 0; } }
+
+    /* Rendered markdown */
+    #md-output { font-size: 13px; line-height: 1.7; color: var(--text); }
+    #md-output h2 {
+      font-size: 15px; font-weight: 700; color: var(--accent-h);
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 6px; margin: 22px 0 10px;
+    }
+    #md-output h2:first-child { margin-top: 0; }
+    #md-output h3 { font-size: 13px; font-weight: 600; margin: 14px 0 6px; }
+    #md-output p  { margin: 6px 0; }
+    #md-output ul, #md-output ol { padding-left: 20px; margin: 6px 0; }
+    #md-output li { margin: 3px 0; }
+    #md-output strong { color: #fff; }
+    #md-output code {
+      font-family: var(--mono); font-size: 12px;
+      background: #12151f; padding: 1px 5px; border-radius: 4px;
+    }
+    #md-output table {
+      border-collapse: collapse; width: 100%; margin: 10px 0; font-size: 13px;
+    }
+    #md-output th {
+      background: #12151f; padding: 7px 12px; text-align: left;
+      border: 1px solid var(--border); color: var(--muted); font-weight: 600;
+    }
+    #md-output td { padding: 7px 12px; border: 1px solid var(--border); }
+    #md-output tr:nth-child(even) td { background: #13161f; }
 
     .result-meta {
       font-size: 11px;
@@ -219,7 +248,6 @@
 <header>
   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:#5b8af5"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>
   <h1>CP Subsystem AI Analysis</h1>
-  <span class="badge">Strategy 2</span>
   <div id="prom-status">
     <div id="prom-dot"></div>
     <span id="prom-label">Prometheus</span>
@@ -422,6 +450,8 @@
     });
 
     src.addEventListener('done', () => {
+      mdOut.classList.remove('streaming');
+      mdOut.innerHTML = marked.parse(rawText);
       finish();
     });
 

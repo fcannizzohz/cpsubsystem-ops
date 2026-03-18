@@ -52,7 +52,15 @@ def _duration_label(seconds: float) -> str:
 @app.get("/", response_class=HTMLResponse)
 async def index():
     with open("static/index.html") as f:
-        return f.read()
+        content = f.read()
+    return HTMLResponse(
+        content=content,
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
 
 
 @app.get("/api/models")
