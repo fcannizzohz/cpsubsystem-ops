@@ -297,12 +297,12 @@ All six dashboards are provisioned automatically and available at http://localho
 
 | UID | Title | Focus | Preview |
 |-----|-------|-------|---------|
-| `hz-cp-subsystem` | CP Subsystem Overview | Broad day-to-day health: cluster, Raft, CP inventory, maps, member health | [![cp-subsystem](images/cp-subsystem.png)](images/cp-subsystem.png) |
-| `hz-cp-subsystem-ops` | CP Subsystem Operations | Quorum health, contention, data structure lifecycle, sessions | [![cp-subsystem-operations](images/cp-subsystem-operations.png)](images/cp-subsystem-operations.png) |
-| `hz-raft` | HZ CP — Raft Internals | Deep dive: log replication, commit lag, snapshots, leader elections | [![raft-internals](images/raft-internals.png)](images/raft-internals.png) |
-| `hz-cp-health` | HZ CP — Subsystem Health | Membership, quorum status per group, Group Status table | [![cp-subsystem-health](images/cp-subsystem-health.png)](images/cp-subsystem-health.png) |
-| `hz-cp-maps` | HZ CP — Map Operations | Per-map entry count, storage, capacity, Raft write throughput | [![cp-map-operations](images/cp-map-operations.png)](images/cp-map-operations.png) |
-| `hz-cp-datastruct` | HZ CP — Data Structures | FencedLock, ISemaphore, IAtomicLong, CP Sessions inventory | [![cp-data-structures](images/cp-data-structures.png)](images/cp-data-structures.png) |
+| `hz-cp-subsystem` | CP Subsystem Overview | Broad day-to-day health: cluster, Raft, CP inventory, maps, member health | <a href="images/cp-subsystem.png"><img src="images/cp-subsystem.png" width="160" alt="cp-subsystem"/></a> |
+| `hz-cp-subsystem-ops` | CP Subsystem Operations | Quorum health, contention, data structure lifecycle, sessions | <a href="images/cp-subsystem-operations.png"><img src="images/cp-subsystem-operations.png" width="160" alt="cp-subsystem-operations"/></a> |
+| `hz-raft` | HZ CP — Raft Internals | Deep dive: log replication, commit lag, snapshots, leader elections | <a href="images/raft-internals.png"><img src="images/raft-internals.png" width="160" alt="raft-internals"/></a> |
+| `hz-cp-health` | HZ CP — Subsystem Health | Membership, quorum status per group, Group Status table | <a href="images/cp-subsystem-health.png"><img src="images/cp-subsystem-health.png" width="160" alt="cp-subsystem-health"/></a> |
+| `hz-cp-maps` | HZ CP — Map Operations | Per-map entry count, storage, capacity, Raft write throughput | <a href="images/cp-map-operations.png"><img src="images/cp-map-operations.png" width="160" alt="cp-map-operations"/></a> |
+| `hz-cp-datastruct` | HZ CP — Data Structures | FencedLock, ISemaphore, IAtomicLong, CP Sessions inventory | <a href="images/cp-data-structures.png"><img src="images/cp-data-structures.png" width="160" alt="cp-data-structures"/></a> |
 
 ### Template variables (all dashboards)
 
