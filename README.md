@@ -1,6 +1,6 @@
 # Hazelcast CP Subsystem — Ops & Monitoring
 
-A self-contained Docker Compose environment for running, load-testing, and AI-assisted monitoring of the Hazelcast CP Subsystem. The stack includes a 5-node Hazelcast Enterprise cluster, Management Center, Prometheus, Grafana with six purpose-built dashboards, and an AI analysis agent backed by live MCP tool servers for Prometheus queries and Hazelcast container logs.
+A self-contained Docker Compose environment for running and monitoring the Hazelcast CP Subsystem. The stack includes a 5-node Hazelcast Enterprise cluster, Management Center, Prometheus, Grafana with six purpose-built dashboards, and a traffic generator that drives continuous load across all CP data structures.
 
 ---
 
@@ -17,8 +17,7 @@ A self-contained Docker Compose environment for running, load-testing, and AI-as
 9. [Available Metrics](#available-metrics)
 10. [Dashboards](#dashboards)
 11. [Alerting Rules](#alerting-rules)
-12. [AI Analysis Agent](#ai-analysis-agent)
-13. [TODO](#todo)
+12. [TODO](#todo)
 
 
 
@@ -63,33 +62,26 @@ CP structures are organised into **CP groups**. Each group is an independent Raf
 ┌──────────────────────────────────────────────────────────────────┐
 │  Docker network: hz-net                                          │
 │                                                                  │
-│  ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐                    │
-│  │ hz1  │ │ hz2  │ │ hz3  │ │ hz4  │ │ hz5  │  HZ Enterprise     │
-│  │:5701 │ │:5701 │ │:5701 │ │:5701 │ │:5701 │  5.6.0             │
-│  └──┬───┘ └──┬───┘ └──┬───┘ └──┬───┘ └──┬───┘                    │
-│     └────────┴────────┴────────┴────────┘                        │
-│              │ cluster metrics          │ container logs         │
-│     ┌─────────────────┐      ┌──────────────────────┐            │
-│     │ Management      │      │ hz-mcp-server        │            │
-│     │ Center :8080    │      │ :8002 (MCP/SSE)      │            │
-│     └────────┬────────┘      │ log tools            │            │
-│              │ /metrics      └──────────┬───────────┘            │
-│     ┌─────────────────┐                 │                        │
-│     │ Prometheus      │  scrape 15s     │                        │
-│     │ :9090           │  retention 15d  │ MCP (SSE)              │
-│     └────┬───────┬────┘                 │                        │
-│          │       │ PromQL               │                        │
-│   ┌──────┘  ┌────────────────────┐      │                        │
-│   │         │ prom-mcp-server    │      │                        │
-│   │ Grafana │ :8001 (MCP/SSE)    │      │                        │
-│   │ :3000   │ Prometheus tools   │      │                        │
-│   │ 6 dsb's └──────────┬─────────┘      │                        │
-│   └─────────────────── │ MCP (SSE) ─────┘                        │
-│                   ┌────┴─────────────┐                           │
-│                   │ analysis-agent   │                           │
-│                   │ :8000            │                           │
-│                   │ UI + LLM + chat  │                           │
-│                   └──────────────────┘                           │
+│  ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐                   │
+│  │ hz1  │ │ hz2  │ │ hz3  │ │ hz4  │ │ hz5  │  HZ Enterprise    │
+│  │:5701 │ │:5701 │ │:5701 │ │:5701 │ │:5701 │  5.6.0            │
+│  └──┬───┘ └──┬───┘ └──┬───┘ └──┬───┘ └──┬───┘                   │
+│     └────────┴────────┴────────┴────────┘                       │
+│                        │ cluster metrics                         │
+│              ┌─────────────────┐                                 │
+│              │ Management      │                                 │
+│              │ Center :8080    │                                 │
+│              └────────┬────────┘                                 │
+│                       │ /metrics                                 │
+│              ┌─────────────────┐                                 │
+│              │ Prometheus      │  scrape 15s, retention 15d      │
+│              │ :9090           │                                 │
+│              └────────┬────────┘                                 │
+│                       │ PromQL                                   │
+│              ┌─────────────────┐                                 │
+│              │ Grafana :3000   │                                 │
+│              │ 6 dashboards    │                                 │
+│              └─────────────────┘                                 │
 │                                                                  │
 │  ┌──────────────────┐                                            │
 │  │ traffic-generator│  CPMap + FencedLock + ISemaphore +         │
@@ -110,9 +102,6 @@ CP structures are organised into **CP groups**. Each group is an independent Raf
 | Management Center | 8080 | UI + Prometheus `/metrics` |
 | Prometheus | 9090 | Query + alerting |
 | Grafana | 3000 | Dashboards |
-| analysis-agent | 8000 | AI analysis UI + chat |
-| prom-mcp-server | internal :8001 | MCP/SSE — Prometheus tools for chat |
-| hz-mcp-server | internal :8002 | MCP/SSE — Hazelcast log tools for chat |
 
 ---
 
@@ -587,103 +576,6 @@ Defined in [prometheus/rules/cp-subsystem.yml](prometheus/rules/cp-subsystem.yml
 | `CPGroupHighCommitLag` | `hz:cp_group:commit_lag > 100` for 1 m | warning | A follower is significantly behind the leader |
 
 > **Note:** The recording rules in `cp-subsystem.yml` still reference the non-existent V2 names (`hazelcast_raft_*`). They need to be updated to use the actual V1 names (`hz_raft_*`).
-
----
-
-## AI Analysis Agent
-
-The AI analysis stack lives under [ai/](ai/) and consists of three services:
-
-| Directory | Docker service | Purpose |
-|-----------|---------------|---------|
-| [ai/analysis-agent/](ai/analysis-agent/) | `analysis-agent` (:8000) | FastAPI UI + LLM streaming analysis + follow-up chat |
-| [ai/prom-mcp-server/](ai/prom-mcp-server/) | `mcp-prometheus` (:8001) | MCP server exposing Prometheus tools over HTTP/SSE |
-| [ai/hz-mcp-server/](ai/hz-mcp-server/) | `mcp-hazelcast` (:8002) | MCP server exposing Hazelcast container log tools over HTTP/SSE |
-
-### How it works
-
-**Analysis flow:**
-
-1. The UI runs **27 instant queries** (current state snapshot) and **18 range queries** (time-series summarised over the chosen window) against Prometheus in parallel.
-2. Each time-series is summarised server-side into `{min, max, avg, latest, trend, spike_count}` — no raw arrays reach the model.
-3. Cluster topology (CP members, groups, group size, quorum, CPMap size limit) is derived from live Prometheus data and injected as structured context.
-4. An optional **Operator Context** panel lets you inject free-text notes (recent deployments, incidents) that are included in the prompt and persisted in `localStorage`.
-5. The LLM response streams back via Server-Sent Events and renders as Markdown.
-
-The analysis covers eight capability areas:
-
-| Area | Metrics used |
-|------|-------------|
-| Cluster membership | `reporting_members`, `reachable_cp_members`, `missing_cp_members` |
-| Raft consensus | terms, commit/apply rates, commit lag, uncommitted entries, follower lag per member |
-| Log & snapshot health | `available_log_capacity`, `snapshot_lag`, `snapshot_index_over_time` |
-| Member resource health | JVM heap %, CPU %, uptime / restart detection |
-| CP Maps | entry counts, storage bytes, capacity utilisation % (20 MB limit) |
-| Data structures | FencedLock (hold count, owner session, reentrancy depth), ISemaphore permits, IAtomicLong rates |
-| CP sessions | heartbeat rate, session expiry risk cross-referenced with lock ownership |
-| CP object lifecycle | cumulative destroyed locks / semaphores / atomic longs, churn trend |
-
-**Follow-up chat flow:**
-
-After analysis completes, a chat panel in the sidebar allows free-form follow-up questions. The `analysis-agent` connects to **both** MCP servers over HTTP/SSE using the MCP protocol. Tools from all servers are merged into a single list; each call is routed to the correct server by tool name.
-
-**Prometheus MCP tools** (`mcp-prometheus`):
-
-| Tool | Description |
-|------|-------------|
-| `prometheus_query` | Instant PromQL query |
-| `prometheus_query_range` | Range PromQL query |
-| `prometheus_list_metrics` | Discover metric names by prefix |
-
-**Hazelcast MCP tools** (`mcp-hazelcast`):
-
-| Tool | When to use |
-|------|-------------|
-| `hz_get_member_config` | Fetch the live Hazelcast config for a member from Management Center (XML→JSON). Use to verify CP settings: session TTL, group size, missing-member timeout, CPMap size limits. |
-| `hz_log_summary` | Always call first — returns WARN/ERROR line counts per member (~50 tokens). Use to identify which members have issues before fetching log content. |
-| `hz_get_logs` | Fetch filtered log lines for specific members, severity level, and keywords. Server-side filtered; stack traces folded to one line. |
-| `hz_get_diagnostic_logs` | Fetch diagnostic log files from a member container. Use only when `hz_get_logs` reveals an issue needing deeper trace. |
-
-The LLM runs an agentic loop — calling tools as needed until it produces a final answer. The guided workflow (summary → filtered logs → diagnostic) minimises token consumption.
-
-### Quick start
-
-```bash
-# via Docker Compose (recommended — starts the full stack)
-export HZ_LICENSEKEY=<your-license-key>
-export ANTHROPIC_API_KEY=sk-ant-...
-export OPENAI_API_KEY=sk-...        # optional — for OpenAI models
-docker compose up -d
-# → http://localhost:8000
-
-# rebuild only the AI services after a code change
-docker compose up -d --build analysis-agent mcp-prometheus mcp-hazelcast
-```
-
-### Configuration
-
-| Environment variable | Service | Default | Description |
-|---|---|---|---|
-| `PROMETHEUS_URL` | analysis-agent, mcp-prometheus | `http://prometheus:9090` | Prometheus base URL |
-| `MCP_SERVER_URL` | analysis-agent | `http://mcp-prometheus:8001` | Prometheus MCP server URL for chat |
-| `MCP_HZ_URL` | analysis-agent | `http://mcp-hazelcast:8002` | Hazelcast log MCP server URL (omit to disable log tools) |
-| `HZ_MEMBERS` | mcp-hazelcast | `hz1,hz2,hz3,hz4,hz5` | Comma-separated container names for log access |
-| `MC_URL` | analysis-agent, mcp-hazelcast | `http://management-center:8080` | Management Center base URL (for member config fetch) |
-| `MC_CLUSTER` | analysis-agent, mcp-hazelcast | `dev` | Hazelcast cluster name used in MC API paths |
-| `ANTHROPIC_API_KEY` | analysis-agent | — | Required for Claude models |
-| `OPENAI_API_KEY` | analysis-agent | — | Required for OpenAI models |
-
-### Available models
-
-| Model | Provider |
-|---|---|
-| Claude Sonnet 4.6 | Anthropic |
-| Claude Opus 4.6 | Anthropic |
-| Claude Haiku 4.5 | Anthropic |
-| GPT-4o | OpenAI |
-| GPT-4o mini | OpenAI |
-
-> Analysis (the Analyse button) and follow-up chat both use the model selected in the UI. Follow-up chat supports both Claude and OpenAI models with the same agentic tool-calling loop.
 
 ---
 
