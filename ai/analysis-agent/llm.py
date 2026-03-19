@@ -178,10 +178,10 @@ Use `group_size` from Cluster Context.
   - Cross-reference with `member_heap_over_time` and `member_cpu_over_time` to find root cause
 
 ### Log health
-- `available_log_capacity`:
-  - >1000 → healthy
-  - <1000 → warning
-  - 0 → critical (writes blocked)
+- `available_log_capacity` (derived: 200 − uncommitted entries; max=200 with default config):
+  - >100 → healthy
+  - 50–100 → warning
+  - <50 → critical (approaching write rejection at 0)
 
 - `snapshot_lag` (instant) and `snapshot_index_over_time` (range):
   - `snapshot_lag` < 10 000 → healthy (snapshot due soon or recently taken)

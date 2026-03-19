@@ -60,8 +60,8 @@ Key hz_raft_* metric names (use EXACTLY these — do NOT invent names):
   hz_raft_group_commitIndex             — highest committed log index
   hz_raft_group_lastApplied             — highest applied log index
   hz_raft_group_lastLogIndex            — last entry written to the log
-  hz_raft_group_snapshotIndex           — log index at last snapshot (step-ups = snapshots taken)
-  hz_raft_group_availableLogCapacity    — remaining log slots before exhaustion (NOT "log_size")
+  hz_raft_group_snapshotIndex           — log index at last snapshot; only exported after the first snapshot is taken
+  hz_raft_group_availableLogCapacity    — remaining log slots; only exported when the log starts filling up
   hz_raft_group_memberCount             — members in this Raft group
   hz_raft_metadata_activeMembers        — active CP members (METADATA group only)
   hz_raft_missingMembers                — CP members currently unreachable
@@ -69,7 +69,10 @@ Key hz_raft_* metric names (use EXACTLY these — do NOT invent names):
   hz_raft_nodes                         — Raft nodes hosted by this member
 
 There is NO hz_raft_log_size or hz_raft_snapshot_count metric — these do not exist.
-Use hz_raft_group_availableLogCapacity for log fullness and hz_raft_group_snapshotIndex for snapshot tracking.
+hz_raft_group_availableLogCapacity and hz_raft_group_snapshotIndex may return no data on lightly loaded
+clusters (MC does not export them until they deviate from their initial values).
+For log pressure, prefer: 200 - max by (name)(hz_raft_group_lastLogIndex - hz_raft_group_commitIndex)
+For snapshot lag, prefer: max by (name)(hz_raft_group_lastLogIndex) - (max by (name)(hz_raft_group_snapshotIndex) or max by (name)(hz_raft_group_commitIndex) * 0)
 
 ## Hazelcast log tool guidance (token-efficient workflow)
 When logs may help (e.g. elections, exceptions, timeout errors):

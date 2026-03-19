@@ -73,9 +73,10 @@ INSTANT_QUERIES: list[InstantQuery] = [
     ),
     InstantQuery(
         name="available_log_capacity",
-        query="min by (name)(hz_raft_group_availableLogCapacity)",
-        description="Minimum remaining Raft log capacity per group",
-        healthy_hint="Approaches 0 as log fills; writes rejected at 0; alert at < 1000",
+        query="200 - max by (name)(hz_raft_group_lastLogIndex - hz_raft_group_commitIndex)",
+        description="Estimated remaining Raft log capacity per group "
+                    "(200 - uncommitted entries; assumes default uncommitted-entry-count-to-reject-new-appends=200)",
+        healthy_hint="Approaches 0 as log fills; writes rejected at 0; alert at < 50",
     ),
     InstantQuery(
         name="uncommitted_entries",
@@ -85,8 +86,12 @@ INSTANT_QUERIES: list[InstantQuery] = [
     ),
     InstantQuery(
         name="snapshot_lag",
-        query="max by (name)(hz_raft_group_lastLogIndex - hz_raft_group_snapshotIndex)",
-        description="Log entries since the last snapshot per group",
+        query="max by (name)(hz_raft_group_lastLogIndex)"
+              " - (max by (name)(hz_raft_group_snapshotIndex)"
+              "    or max by (name)(hz_raft_group_commitIndex) * 0)",
+        description="Log entries since the last snapshot per group "
+                    "(falls back to lastLogIndex when snapshotIndex is not yet exported — "
+                    "i.e. no snapshot has been taken yet)",
         healthy_hint="Resets toward 0 each time a snapshot is taken (every ~10 000 entries); "
                      "sustained near 10 000 without reset = snapshots not happening",
     ),
@@ -271,14 +276,18 @@ RANGE_QUERIES: list[RangeQuery] = [
     ),
     RangeQuery(
         name="log_capacity_over_time",
-        query="min by (name)(hz_raft_group_availableLogCapacity)",
-        description="Minimum available Raft log capacity per group over time",
-        healthy_hint="Decreasing trend without recovery = snapshots not keeping up",
+        query="200 - max by (name)(hz_raft_group_lastLogIndex - hz_raft_group_commitIndex)",
+        description="Estimated available Raft log capacity per group over time "
+                    "(200 - uncommitted entries; assumes default uncommitted-entry-count-to-reject-new-appends=200)",
+        healthy_hint="Decreasing trend without recovery = snapshots not keeping up; "
+                     "approaching 0 = writes will be rejected",
     ),
     RangeQuery(
         name="snapshot_index_over_time",
-        query="max by (name)(hz_raft_group_snapshotIndex)",
-        description="Snapshot index per group over time — should step up periodically",
+        query="(max by (name)(hz_raft_group_snapshotIndex))"
+              " or (max by (name)(hz_raft_group_commitIndex) * 0)",
+        description="Snapshot index per group over time — steps up each time a snapshot is taken "
+                    "(shows 0 before the first snapshot is taken)",
         healthy_hint="Regular step-ups = snapshots are happening (every ~10 000 commits); "
                      "flat line over a long window = no snapshots taken = log exhaustion risk",
     ),
