@@ -44,18 +44,45 @@ A JSON object describing:
 - group size and quorum
 - CP groups
 - workload roles per group
-- `cp_subsystem_config` (optional) — live CP subsystem config fetched from Management Center,
-  including `session-time-to-live-seconds`, `session-heartbeat-interval-seconds`,
-  `missing-cp-member-auto-removal-seconds`, and CPMap `max-size-mb` per map
+- `cp_subsystem_config` (optional) — live CP subsystem config fetched from Management Center.
+  Structure is a nested dict mirroring the Hazelcast XML. Key fields by path:
+
+  Top-level keys:
+    `cp-member-count`                    — total CP members configured
+    `group-size`                         — members per CP group (3 / 5 / 7)
+    `session-time-to-live-seconds`       — session expires this long after last heartbeat (default 60)
+    `session-heartbeat-interval-seconds` — client heartbeat frequency in seconds (default 5)
+    `missing-cp-member-auto-removal-seconds` — absent member auto-removed after N seconds
+                                              (default 14400; 0 = never; ignored when persistence enabled)
+    `cp-member-priority`                 — leader preference weight (higher = preferred as leader)
+
+  Under `persistence` (nested dict):
+    `persistence-enabled`                — "true" / "false"
+    `base-dir`                           — storage path for CP persistence data
+    `data-load-timeout-seconds`          — max seconds to restore CP state from disk on restart
+
+  Under `raft-algorithm` (nested dict):
+    `uncommitted-entry-count-to-reject-new-appends` — write-rejection threshold (default 200)
+    `commit-index-advance-count-to-snapshot`        — snapshot trigger (default 10000)
+    `leader-election-timeout-in-millis`             — heartbeat miss timeout (default 5000)
+    `leader-heartbeat-period-in-millis`             — leader heartbeat interval (default 5000)
+    `max-missed-leader-heartbeat-count`             — missed heartbeats before election (default 5)
+
+  Under `cp-maps` → `cp-map` (single dict or list of dicts, each with):
+    `name`                               — CPMap name
+    `max-size-mb`                        — storage cap for this map (default 20)
 - `cluster_health` (optional) — Hazelcast REST health check results per member, each containing:
   `nodeState` (ACTIVE/PASSIVE/SHUT_DOWN), `clusterState` (ACTIVE/FROZEN/PASSIVE/IN_TRANSITION),
   `clusterSafe` (bool), `migrationQueueSize` (int), `clusterSize` (int), or `error` if unreachable
 
 Rules:
 - ALL topology assumptions MUST come from Cluster Context.
-- Do NOT assume defaults (e.g. number of members, group size, session TTL).
-- When `cp_subsystem_config` is present, use its values for threshold calculations
-  (e.g. session expiry risk, CPMap capacity). Override any hardcoded defaults.
+- Do NOT assume defaults for any value present in `cp_subsystem_config`.
+- When `cp_subsystem_config` is present, use its values for ALL threshold calculations
+  (session expiry, CPMap capacity, log rejection, snapshot trigger, election timing).
+  See "Config-driven thresholds" section for the complete mapping.
+- When `cp_subsystem_config` is absent, use the hardcoded defaults listed in that section
+  and record "cp_subsystem_config absent — defaults used" in Analysis Confidence.
 - If required context is missing, state this in Analysis Confidence.
 
 ## Metrics Snapshot
@@ -131,6 +158,33 @@ Assume:
 - Values are pre-aggregated as defined by queries.
 - Range queries represent recent behaviour and MUST be used for trend analysis.
 
+## Config-driven thresholds
+Replace these defaults with values from `cp_subsystem_config` wherever the field is present.
+Reference these whenever you evaluate the corresponding metric.
+
+| Threshold | Config path | Default |
+|---|---|---|
+| Session expiry risk window (ms) | `session-time-to-live-seconds` × 1000 | 60 000 |
+| Session heartbeat interval | `session-heartbeat-interval-seconds` | 5 s |
+| Missing-member auto-removal | `missing-cp-member-auto-removal-seconds` | 14 400 s |
+| Persistence enabled | `persistence.persistence-enabled` | false |
+| Persistence recovery timeout | `persistence.data-load-timeout-seconds` | 120 s |
+| Write-rejection threshold (log) | `raft-algorithm.uncommitted-entry-count-to-reject-new-appends` | 200 entries |
+| Snapshot trigger | `raft-algorithm.commit-index-advance-count-to-snapshot` | 10 000 entries |
+| Election timeout | `raft-algorithm.leader-election-timeout-in-millis` | 5 000 ms |
+| Heartbeat period | `raft-algorithm.leader-heartbeat-period-in-millis` | 5 000 ms |
+| Missed heartbeats before election | `raft-algorithm.max-missed-leader-heartbeat-count` | 5 |
+| CPMap storage cap | `cp-maps.cp-map[name=X].max-size-mb` × 1 048 576 | 20 MB |
+
+How to apply:
+- Substitute the config value wherever the default appears in the interpretation rules below.
+- For election timeout risk: expected max tolerable GC pause before a heartbeat miss =
+  `leader-heartbeat-period-in-millis` × `max-missed-leader-heartbeat-count`;
+  if a heap spike duration (from `member_heap_over_time`) exceeds this, an election was expected.
+- For log write-rejection: `available_log_capacity` is (write-rejection threshold − uncommitted entries);
+  thresholds of >50%, 25%, 0% of the write-rejection threshold define healthy / warning / critical.
+- For CPMap utilisation %: recalculate as `sizeBytes / (max-size-mb × 1048576) × 100` per map.
+
 ## Interpretation rules
 
 ### Cluster membership
@@ -166,10 +220,11 @@ Use `group_size` from Cluster Context.
   - ≤1 → unavailable
 
 - `uncommitted_entries` (instant) and `uncommitted_entries_over_time` (range):
-  - 0–10 → healthy
-  - 10–50 → mild write pressure
-  - 50–150 → warning (approaching saturation)
-  - ≥200 → critical (leader will start rejecting new writes)
+  Let T = `raft-algorithm.uncommitted-entry-count-to-reject-new-appends` (default 200).
+  - 0 – T×5%   → healthy
+  - T×5%–T×25% → mild write pressure
+  - T×25%–T×75%→ warning (approaching saturation)
+  - ≥ T         → critical (leader is rejecting new writes now)
   - Rising trend in range = write saturation building
 
 - `commit_lag_current`:
@@ -189,14 +244,18 @@ Use `group_size` from Cluster Context.
   - Cross-reference with `member_heap_over_time` and `member_cpu_over_time` to find root cause
 
 ### Log health
-- `available_log_capacity` (derived: 200 − uncommitted entries; max=200 with default config):
-  - >100 → healthy
-  - 50–100 → warning
-  - <50 → critical (approaching write rejection at 0)
+Let T = `raft-algorithm.uncommitted-entry-count-to-reject-new-appends` (default 200).
+Let S = `raft-algorithm.commit-index-advance-count-to-snapshot` (default 10 000).
+
+- `available_log_capacity` (derived: T − uncommitted entries):
+  - > T×50%  → healthy
+  - T×25%–T×50% → warning
+  - < T×25% → critical (approaching write rejection)
+  - 0       → writes are being rejected now
 
 - `snapshot_lag` (instant) and `snapshot_index_over_time` (range):
-  - `snapshot_lag` < 10 000 → healthy (snapshot due soon or recently taken)
-  - `snapshot_lag` approaching 10 000 → snapshot expected; check `snapshot_index_over_time`
+  - `snapshot_lag` < S → healthy (snapshot not yet due)
+  - `snapshot_lag` approaching S → snapshot expected soon; check `snapshot_index_over_time`
   - `snapshot_index_over_time` flat over long window → no snapshots = log exhaustion risk
   - Combine with `log_capacity_over_time`: falling capacity + no snapshot step = critical
 
@@ -221,15 +280,20 @@ Use `group_size` from Cluster Context.
 
 ### CPMap capacity health
 
-Use `cp_map_max_size_mb` from Cluster Context, or the per-map `max-size-mb` value from
-`cp_subsystem_config.cp-maps` if present (falls back to 20 MB if neither is set).
+For each CPMap, the storage cap (C) is determined in priority order:
+1. `cp_subsystem_config.cp-maps.cp-map[name=<map>].max-size-mb` × 1 048 576 (per-map config)
+2. `cp_map_max_size_mb` from Cluster Context × 1 048 576 (cluster-wide fallback)
+3. 20 × 1 048 576 bytes (hardcoded default)
 
-- `cp_map_utilization_pct`:
-  - < 70 % → healthy
+Recalculate utilisation as `cp_map_storage_bytes / C × 100` when config is present
+(the pre-computed `cp_map_utilization_pct` always uses 20 MB; it will be wrong if max-size-mb differs).
+
+- Utilisation %:
+  - < 70 %  → healthy
   - 70–80 % → warning (approaching limit)
   - 80–95 % → critical (writes will be rejected soon)
-  - > 95 % → critical (writes likely already failing)
-  - Combine with `cp_map_entry_trend`: growing entry count + high utilization = imminent rejection risk
+  - > 95 %  → critical (writes likely already failing)
+  - Combine with `cp_map_entry_trend`: growing entry count + high utilisation = imminent rejection risk
 
 ### Data structure health
 
@@ -270,14 +334,18 @@ Use `cp_map_max_size_mb` from Cluster Context, or the per-map `max-size-mb` valu
   - spikes → bursty increment workload
 
 **CP Sessions** (`session_heartbeat_rate`, `session_expiry_snapshot`):
+Let TTL_ms = `session-time-to-live-seconds` × 1000 (default 60 000 ms).
+Let HB_s   = `session-heartbeat-interval-seconds` (default 5 s).
+
 - `session_heartbeat_rate` reflects how frequently session version increments
   (heartbeats from connected clients).
   - non-zero → sessions are alive and heartbeating
-  - drops to 0 → no active sessions, or clients have disconnected / crashed
+  - Expected rate ≈ active_sessions / HB_s; significant drop = clients disconnected or stalled
+  - drops to 0 → no active sessions, or all clients disconnected / crashed
   - sustained low rate with active data-structure traffic → session TTL risk
 - `session_expiry_snapshot`: epoch ms when each session expires.
   - Compare each value to the analysis end timestamp (in ms).
-  - Sessions expiring within 60 000 ms (1 TTL interval) of the analysis end = imminent expiry risk.
+  - Sessions expiring within TTL_ms of the analysis end = imminent expiry risk.
   - If such sessions own FencedLocks (`lock_owner_session` match) or hold semaphore permits,
     their release will be unexpected and may unblock waiting clients.
   - If a session expiry time is in the past → session has already expired; any held locks
@@ -536,9 +604,12 @@ The Detail cell must contain specific observed values — never leave it as "…
 1. **Action**: specific, actionable step.
 
 ## Analysis Confidence
-1. **Provenance**: supporting metrics and values per finding.
-2. **Uncertainty / Weaknesses**: where evidence is incomplete or indirect.
-3. **Missing Data**: what additional data would improve confidence.\
+1. **Configuration values used**: list each `cp_subsystem_config` field that affected a threshold
+   or interpretation (e.g. "session-time-to-live-seconds: 300 s — used for session expiry risk").
+   If `cp_subsystem_config` was absent, state: "cp_subsystem_config absent — all thresholds use hardcoded defaults."
+2. **Provenance**: supporting metrics and values per finding.
+3. **Uncertainty / Weaknesses**: where evidence is incomplete or indirect.
+4. **Missing Data**: what additional data would improve confidence.\
 """
 
 
