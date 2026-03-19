@@ -114,6 +114,58 @@ INSTANT_QUERIES: list[InstantQuery] = [
         healthy_hint="Should be equal across members (~3 for group-size=3 with 8 groups)",
     ),
 
+    # ── Member presence cross-check ───────────────────────────────────────
+    InstantQuery(
+        name="member_presence_cross_check",
+        query="count(count by (mc_member)(hz_raft_group_term))",
+        description="Number of CP members actively sending metrics to MC right now "
+                    "(cross-check: compare to cp_member_count and hz_raft_missingMembers "
+                    "to distinguish restart / partition / MC scrape lag)",
+        healthy_hint="Must equal cp_member_count; "
+                     "drop + missingMembers=0 = MC scrape lag (not a real failure); "
+                     "drop + missingMembers>0 = member absent from CP subsystem view; "
+                     "drop + uptime reset on that member = restart",
+    ),
+
+    # ── Per-member follower lag (instant snapshot) ─────────────────────────
+    InstantQuery(
+        name="follower_lag_per_member_current",
+        query="max by (name)(hz_raft_group_commitIndex)"
+              " - on(name) group_right()"
+              " max by (name, mc_member)(hz_raft_group_lastApplied)",
+        description="Current gap between the cluster-max commitIndex and each member's "
+                    "lastApplied — identifies which specific member is lagging right now",
+        healthy_hint="0 = fully caught up; one member persistently > 0 while others are ~0 "
+                     "= slow follower blocking quorum acks (check its heap and CPU); "
+                     "all members lag equally = write pressure, not a follower issue",
+    ),
+
+    # ── METADATA group health (proxy caching signal) ──────────────────────
+    InstantQuery(
+        name="metadata_group_commit_rate",
+        query='rate(hz_raft_group_commitIndex{name="METADATA"}[5m])',
+        description="Current commit rate on the METADATA CP group — elevated rate at steady "
+                    "workload (no group creation) may indicate CP proxy objects are being "
+                    "fetched without caching; each uncached getCPSubsystem().get*() call "
+                    "triggers an internal METADATA commit",
+        healthy_hint="Near zero at steady state = proxies are cached correctly; "
+                     "sustained high rate proportional to operation throughput = "
+                     "application fetching CP proxies per-operation instead of caching them",
+    ),
+
+    # ── CP group leadership distribution ──────────────────────────────────
+    InstantQuery(
+        name="leader_commit_rate_per_member",
+        query="rate(hz_raft_group_commitIndex[2m])",
+        description="Current commit rate per CP group per member — the member with non-zero "
+                    "rate for a given group is its current leader; followers produce zero "
+                    "commit-rate. Use to detect leadership concentration on one member.",
+        healthy_hint="One member per group should have non-zero rate; if one member has "
+                     "non-zero rate for significantly more groups than others = leadership "
+                     "is concentrated (bottleneck risk); Hazelcast auto-rebalances — "
+                     "transient post-restart imbalance is normal and self-corrects",
+    ),
+
     # ── Member resource health ─────────────────────────────────────────────
     InstantQuery(
         name="member_heap_used_pct",
@@ -197,6 +249,24 @@ INSTANT_QUERIES: list[InstantQuery] = [
     ),
 
     # ── CP object lifecycle ────────────────────────────────────────────────
+    InstantQuery(
+        name="locks_live",
+        query="max(hz_cp_lock_summary_live_count)",
+        description="Currently active (non-destroyed) FencedLock instance count",
+        healthy_hint="Stable = expected; sudden drop = locks destroyed; growth = new locks being created",
+    ),
+    InstantQuery(
+        name="semaphores_live",
+        query="max(hz_cp_semaphore_summary_live_count)",
+        description="Currently active (non-destroyed) ISemaphore instance count",
+        healthy_hint="Stable = expected; frequent creation/destruction = anti-pattern",
+    ),
+    InstantQuery(
+        name="atomiclong_live",
+        query="max(hz_cp_atomiclong_summary_live_count)",
+        description="Currently active (non-destroyed) IAtomicLong instance count",
+        healthy_hint="Stable = expected; frequent creation/destruction = anti-pattern",
+    ),
     InstantQuery(
         name="locks_destroyed",
         query="max(hz_cp_lock_summary_destroyed_count)",
@@ -355,6 +425,20 @@ RANGE_QUERIES: list[RangeQuery] = [
         description="CP session heartbeat rate (version increments per second)",
         unit="heartbeats/s",
         healthy_hint="Non-zero = sessions are active and heartbeating; zero = no active sessions or sessions stalled",
+    ),
+
+    # ── METADATA group health (proxy caching signal) ──────────────────────
+    RangeQuery(
+        name="metadata_commit_rate_over_time",
+        query='rate(hz_raft_group_commitIndex{name="METADATA"}[5m])',
+        description="METADATA CP group commit rate over time — spikes indicate CP group "
+                    "creation, session management, or uncached CP proxy fetches. "
+                    "Compare magnitude to data-group commit rates to assess whether "
+                    "METADATA is disproportionately loaded.",
+        unit="commits/s",
+        healthy_hint="Low baseline with brief spikes on demand = healthy; "
+                     "sustained elevated rate at steady state (no group creation) = "
+                     "application likely not caching CP proxy objects",
     ),
 
     # ── CP object lifecycle ────────────────────────────────────────────────

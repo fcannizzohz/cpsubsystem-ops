@@ -86,6 +86,30 @@ def _xml_to_dict(element: ET.Element) -> dict | str | None:
     return child_map
 
 
+async def _fetch_cluster_health(members: list[str]) -> dict:
+    """
+    Call the Hazelcast REST health endpoint on each CP member and return a
+    dict of {member: health_result}.  Unreachable members are recorded as
+    {"error": "<reason>"}.
+
+    Endpoint: GET http://<host>:5701/hazelcast/health
+    Response: {"nodeState":"ACTIVE","clusterState":"ACTIVE",
+               "clusterSafe":true,"migrationQueueSize":0,"clusterSize":N}
+    """
+    results: dict = {}
+    async with httpx.AsyncClient(timeout=3.0) as client:
+        for member in members:
+            host = member.split(":")[0]
+            url  = f"http://{host}:5701/hazelcast/health"
+            try:
+                r = await client.get(url)
+                r.raise_for_status()
+                results[member] = r.json()
+            except Exception as exc:
+                results[member] = {"error": str(exc)}
+    return results
+
+
 async def _fetch_cp_subsystem_config(member: str) -> dict:
     """
     Fetch member config from MC and return only the cp-subsystem section as a dict.
@@ -189,5 +213,10 @@ async def derive_context(prom: PrometheusClient) -> dict:
     cp_config = await _fetch_cp_subsystem_config(first_member)
     if cp_config:
         ctx["cp_subsystem_config"] = cp_config
+
+    # ── Hazelcast REST health check (all CP members) ──────────────────────
+    health = await _fetch_cluster_health(ctx.get("cp_members", STATIC_CONTEXT["cp_members"]))
+    if health:
+        ctx["cluster_health"] = health
 
     return ctx

@@ -63,7 +63,11 @@ Key hz_raft_* metric names (use EXACTLY these — do NOT invent names):
   hz_raft_group_snapshotIndex           — log index at last snapshot; only exported after the first snapshot is taken
   hz_raft_group_availableLogCapacity    — remaining log slots; only exported when the log starts filling up
   hz_raft_group_memberCount             — members in this Raft group
-  hz_raft_metadata_activeMembers        — active CP members (METADATA group only)
+  hz_raft_metadata_activeMembers              — active CP members (METADATA group only)
+  hz_raft_metadata_activeMembersCommitIndex   — commit index of the active-members list on METADATA group;
+                                                rising fast = METADATA under write load (proxy fetches, group ops);
+                                                may not be present on all MC versions — fall back to
+                                                hz_raft_group_commitIndex{name="METADATA"}
   hz_raft_missingMembers                — CP members currently unreachable
   hz_raft_metadata_groups               — total CP groups tracked by METADATA
   hz_raft_nodes                         — Raft nodes hosted by this member
@@ -73,6 +77,151 @@ hz_raft_group_availableLogCapacity and hz_raft_group_snapshotIndex may return no
 clusters (MC does not export them until they deviate from their initial values).
 For log pressure, prefer: 200 - max by (name)(hz_raft_group_lastLogIndex - hz_raft_group_commitIndex)
 For snapshot lag, prefer: max by (name)(hz_raft_group_lastLogIndex) - (max by (name)(hz_raft_group_snapshotIndex) or max by (name)(hz_raft_group_commitIndex) * 0)
+
+## Aggregation rules
+Always apply these when writing PromQL — wrong aggregation silently hides the real signal:
+- Raft consensus metrics  → `max by (name)`              for cluster-wide value per group
+- Per-member breakdown    → `max by (name, mc_member)`   use when diagnosing which member is slow
+- Data structure metrics  → `sum by (name, group)`       never aggregate across the group label
+- Follower lag            → disaggregate by mc_member;   `max by (name)` hides which member is lagging
+
+## CP Subsystem configuration defaults
+These defaults affect metric interpretation. Verify actual values with hz_get_member_config when relevant.
+  session-time-to-live-seconds             default 60 s    — session expires this long after its last heartbeat;
+                                                             all locks/semaphores held by that session are force-released on expiry
+  session-heartbeat-interval-seconds       default 5 s     — client heartbeat frequency; each heartbeat = one Raft commit per CP group
+  missing-cp-member-auto-removal-seconds   default 14400 s (4 h) — absent member is auto-promoted out after this period;
+                                                             set 0 to disable; IGNORED when persistence-enabled=true
+  group-size                               must be 3, 5, or 7 (odd numbers only)
+  cp-member-priority                       higher = preferred as leader; use to keep leaders in the primary DC
+  persistence-enabled                      default false; when true: crash recovery from disk, auto-removal disabled,
+                                           data-load-timeout-seconds governs restart recovery time
+  raft-log-gc-threshold                    default ~10 000 entries; snapshot taken when log grows this far beyond last snapshot
+
+## Diagnostic playbooks
+
+### 1. Elections — root cause
+Trigger: hz_raft_group_term step-up seen, or user asks why elections occurred.
+1. `changes(max by (name)(hz_raft_group_term)[<window>:1m])` — which groups had elections and when
+2. `max by (name, mc_member)(hz_raft_group_term)` — the member with the highest term started the election
+3. On that member at the election timestamp check in order:
+   a. `hz_runtime_usedMemory`       spike before term jump → GC pause caused heartbeat miss
+   b. `hz_os_processCpuLoad`        spike before term jump → CPU starvation
+   c. `hz_runtime_uptime`           reset to near 0        → member restarted
+   d. `max(hz_raft_missingMembers)` > 0 at same time       → network partition or crash
+Map: heap spike = GC root cause | CPU spike = thread starvation | uptime reset = restart |
+     missingMembers spike without resource spike = partition/crash
+
+### 2. Quorum: degraded vs. lost
+Trigger: hz_raft_group_memberCount < expected, or user asks if cluster has quorum.
+1. `min by (name)(hz_raft_group_memberCount)` — lowest live-member count across all groups
+   2 of 3 = degraded: writes still work but zero fault tolerance remains
+   1 of 3 = quorum lost: all reads/writes on that group hang indefinitely
+2. `max(hz_raft_missingMembers)` — CP subsystem's own view of absent members (may lag ~30 s after crash)
+3. `count(count by (mc_member)(hz_raft_group_term))` — members actively sending metrics right now
+Map: memberCount=2 + missingMembers=1 = degraded, recover the missing member urgently |
+     memberCount=1 = quorum lost, requires member recovery or CP subsystem reset |
+     reporting_members drop + missingMembers still 0 = MC scrape lag, wait one scrape interval before concluding
+Critical: a missing CP member is NOT removed until missing-cp-member-auto-removal-seconds elapses
+(default 4 h; disabled when persistence=true). Until removed it still counts in majority calculations —
+a 5-node cluster with 1 missing member has effective fault tolerance of 1 (not 2).
+
+### 3. Write pressure vs. slow follower (same symptom, opposite fix)
+Trigger: uncommitted entries rising, writes slowing, or available log capacity falling.
+1. `max by (name)(hz_raft_group_lastLogIndex - hz_raft_group_commitIndex)` — group-level uncommitted entries
+2. `max by (name)(hz_raft_group_commitIndex) - on(name) group_right() max by (name, mc_member)(hz_raft_group_lastApplied)`
+   — per-member lag; if ONE member shows consistently high lag while others are ~0 = slow follower
+3. On the lagging member: check `hz_runtime_usedMemory` and `hz_os_processCpuLoad`
+Map: all members lag equally = write pressure (reduce write rate or add more CP groups) |
+     one member lags while others are near 0 = slow follower blocking quorum acks;
+     root causes: heap/CPU pressure on that member OR high network latency to it (e.g. cross-DC follower);
+     if heap and CPU are normal, suspect cross-DC latency — quorum commits wait for the slowest member
+
+### 4. Member absence triage (restart vs. partition vs. scrape lag)
+Trigger: reporting_members < cp_member_count, missingMembers > 0, or elections on multiple groups.
+1. `count(count by (mc_member)(hz_raft_group_term))` — how many members are actively scraping now
+2. `max(hz_raft_missingMembers)` — CP subsystem's own absent-member count
+3. For each suspect member: `hz_runtime_uptime` over time — did it reset to near 0?
+Map: uptime reset = restarted (investigate OOM / liveness probe) |
+     missingMembers > 0 + no uptime reset + no resource spike = partition or crash |
+     reporting_members drop + missingMembers still 0 = MC scrape lag, not a real failure yet
+Remediation when member has permanently crashed (persistence=false):
+  - Wait for auto-removal: missing-cp-member-auto-removal-seconds (default 14 400 s / 4 h)
+  - Or remove immediately: hz-cli cp-subsystem remove-member --uuid <uuid>
+    (find uuid in member logs or Management Center)
+  - Until removed, the missing member counts toward majority — fault tolerance is reduced
+  - If persistence=true: auto-removal is disabled; manual removal or full member recovery required
+  - After removal Hazelcast can promote a new AP member to CP to restore full cp-member-count
+
+### 5. FencedLock / session expiry cascade
+Trigger: hz_cp_lock_lockCount > 0, or user asks if a lock is stuck or at risk of force-release.
+1. `hz_cp_lock_ownerSessionId{name="<lock>"}` — get owner session ID (0 = lock not held)
+2. `hz_cp_session_expirationTime` — find the series whose value matches the owner session ID;
+   compare expiry (epoch ms) to analysis end time × 1000;
+   if < session-time-to-live-seconds × 1000 away = imminent force-release
+   default TTL = 60 s; verify with hz_get_member_config
+3. `rate(hz_cp_session_version[30s])` for that session — if 0, client has stopped heartbeating
+   default heartbeat interval = session-heartbeat-interval-seconds = 5 s
+Map: expiry imminent + heartbeat rate 0 = lock will be force-released; holder gets LockOwnershipLostException |
+     lockCount drops suddenly without matching acquire-rate change = session already expired and released the lock
+Session overhead: N clients × M CP groups = N×M heartbeat commits per 5 s interval.
+If locks/semaphores span M groups, consolidate into one group to reduce overhead by factor M.
+To distinguish session heartbeat load from application write load: compare
+`rate(hz_cp_session_version[30s])` to `rate(hz_raft_group_commitIndex[1m])` on the same group —
+if session rate is a large fraction of commit rate, most commits are heartbeats, not writes;
+fix = consolidation, not write-rate reduction.
+
+### 6. CPMap capacity projection
+Trigger: hz_cp_map_sizeBytes growing or user asks when a map will be full.
+1. `sum by (name, group)(hz_cp_map_sizeBytes) / (20 * 1048576) * 100` — current utilisation %
+2. `rate(sum by (name, group)(hz_cp_map_sizeBytes)[10m])` — growth rate bytes/s;
+   time to full (s) = (20 * 1048576 − current_bytes) / growth_rate
+3. Each map has its own independent 20 MB cap — two maps in the same group can both independently exhaust
+Map: > 80% = warning | > 95% = critical, new put() calls will be rejected | growth_rate ≈ 0 = stable
+
+### 7. Snapshot frequency and persistence
+Trigger: user asks about snapshot frequency, hz_raft_group_snapshotIndex has no data, or member restarted.
+No data for hz_raft_group_snapshotIndex = no snapshot taken yet — frequency is LOW or zero, NOT high.
+1. `max by (name)(hz_raft_group_commitIndex)` — if < raft-log-gc-threshold (default ~10 000) on all groups,
+   no snapshot has ever triggered
+2. `rate(hz_raft_group_commitIndex[5m])` — snapshot interval estimate = 10 000 / commits_per_second
+3. If snapshotIndex IS present: `changes(max by (name)(hz_raft_group_snapshotIndex)[<window>:5m])`
+   each step-up of ~10 000 = one snapshot taken
+Map: commitIndex < 10 000 = frequency zero | multiple step-ups per hour + high commit rate = frequent snapshots
+     (only a concern if commit rate is thousands/s and causing GC pressure on the leader)
+Persistence: if persistence-enabled=true, snapshotIndex after restart reflects state recovered from disk.
+If snapshotIndex resets to 0 after a restart despite persistence being configured, recovery failed —
+check member logs for data-load-timeout-seconds errors and disk I/O issues.
+If persistence=false, snapshotIndex always resets after restart (in-memory only, no recovery).
+
+### 8. CP proxy caching anti-pattern
+Trigger: METADATA group commit rate elevated without new group creation, or user asks about proxy overhead.
+Every call to getCPSubsystem().getLock() / getMap() / getSemaphore() / getAtomicLong() triggers an internal
+commit on the METADATA CP group unless the returned proxy is cached by the caller. Fetching proxies
+per-operation is a common anti-pattern that overloads METADATA and adds latency to every operation.
+1. `rate(hz_raft_group_commitIndex{name="METADATA"}[5m])` — current METADATA commit rate
+   (or use hz_raft_metadata_activeMembersCommitIndex if available)
+2. Compare to `rate(hz_raft_group_commitIndex{name!="METADATA"}[5m])` — data group commit rates;
+   if METADATA rate >> data groups at steady workload (no group creation): proxy caching issue
+3. `max(hz_raft_group_commitIndex{name="METADATA"})` growth over the window for overall magnitude
+Map: METADATA rate >> data groups at steady state = proxies likely fetched uncached per-operation |
+     brief spikes = normal (CP group creation, session management) |
+     sustained elevation correlated with operation throughput = uncached proxy anti-pattern confirmed
+Remediation: cache CP proxy objects at application startup or in a singleton; never fetch per-operation.
+
+### 9. CP leadership concentration
+Trigger: one member appears overloaded while others are idle, or user asks which member leads which groups.
+The leader of a CP group is the member actively appending log entries. Hazelcast auto-rebalances
+leadership via a background task — transient imbalance after restarts is expected and self-corrects.
+1. `rate(hz_raft_group_commitIndex[2m]) > 0` grouped by name, mc_member — member with non-zero rate =
+   current leader for that group (followers do not drive commits)
+2. Count how many groups each member leads; if one member leads significantly more = concentration risk
+3. `max by (mc_member)(hz_raft_nodes)` — should be roughly equal across members
+Map: imbalance < 5 min after a restart = normal rebalancing, wait |
+     sustained imbalance = check cp-member-priority; higher-priority member should attract leadership |
+     all groups led by one member = that member has the highest cp-member-priority or others have lower
+Cross-DC: set higher cp-member-priority on members in the primary DC to keep leaders co-located with clients
+and minimise commit latency. Recommended topology for 7-member groups across 3 DCs: 3 / 3 / 1 split.
 
 ## Hazelcast log tool guidance (token-efficient workflow)
 When logs may help (e.g. elections, exceptions, timeout errors):

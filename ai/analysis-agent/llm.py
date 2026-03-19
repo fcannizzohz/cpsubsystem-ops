@@ -47,6 +47,9 @@ A JSON object describing:
 - `cp_subsystem_config` (optional) — live CP subsystem config fetched from Management Center,
   including `session-time-to-live-seconds`, `session-heartbeat-interval-seconds`,
   `missing-cp-member-auto-removal-seconds`, and CPMap `max-size-mb` per map
+- `cluster_health` (optional) — Hazelcast REST health check results per member, each containing:
+  `nodeState` (ACTIVE/PASSIVE/SHUT_DOWN), `clusterState` (ACTIVE/FROZEN/PASSIVE/IN_TRANSITION),
+  `clusterSafe` (bool), `migrationQueueSize` (int), `clusterSize` (int), or `error` if unreachable
 
 Rules:
 - ALL topology assumptions MUST come from Cluster Context.
@@ -58,9 +61,11 @@ Rules:
 ## Metrics Snapshot
 
 ### Cluster-level instant metrics
-- `reporting_members`      — members currently sending metrics to MC (most reliable signal)
-- `reachable_cp_members`  — self-reported by CP subsystem (may lag after a crash)
-- `missing_cp_members`    — self-reported by CP subsystem (may lag after a crash)
+- `reporting_members`             — members currently sending metrics to MC (most reliable signal)
+- `reachable_cp_members`         — self-reported by CP subsystem (may lag after a crash)
+- `missing_cp_members`           — self-reported by CP subsystem (may lag after a crash)
+- `member_presence_cross_check`  — same as reporting_members but used explicitly to cross-check against
+                                   cp_member_count and missing_cp_members for the three-way triage
 - `total_cp_groups`
 - `terminated_raft_groups`
 - `raft_nodes_per_member`
@@ -68,10 +73,13 @@ Rules:
 ### Per-group instant metrics (labelled by `name`)
 - `group_member_counts`
 - `available_log_capacity`
-- `uncommitted_entries`   — lastLogIndex - commitIndex (leading write-pressure indicator)
-- `snapshot_lag`          — lastLogIndex - snapshotIndex (entries since last snapshot)
+- `uncommitted_entries`          — lastLogIndex - commitIndex (leading write-pressure indicator)
+- `snapshot_lag`                 — lastLogIndex - snapshotIndex (entries since last snapshot)
 - `commit_lag_current`
 - `raft_terms`
+- `metadata_group_commit_rate`   — current commit rate on the METADATA group (elevated = possible uncached proxy fetches)
+- `leader_commit_rate_per_member`— commit rate per group per member; non-zero member = current leader for that group
+- `follower_lag_per_member_current` — current per-member gap between cluster-max commitIndex and member's lastApplied
 
 ### Member resource instant metrics (labelled by `mc_member`)
 - `member_heap_used_pct`  — JVM heap utilisation % per member
@@ -92,6 +100,9 @@ Rules:
 - `session_expiry_snapshot` — expiration epoch ms per active CP session
 
 ### CP object lifecycle instant metrics
+- `locks_live`            — currently active (non-destroyed) FencedLock instances
+- `semaphores_live`       — currently active (non-destroyed) ISemaphore instances
+- `atomiclong_live`       — currently active (non-destroyed) IAtomicLong instances
 - `locks_destroyed`       — cumulative destroyed FencedLock instances
 - `semaphores_destroyed`  — cumulative destroyed ISemaphore instances
 - `atomiclong_destroyed`  — cumulative destroyed IAtomicLong instances
@@ -274,13 +285,85 @@ Use `cp_map_max_size_mb` from Cluster Context, or the per-map `max-size-mb` valu
 
 ### CP object lifecycle health
 
+- `locks_live`, `semaphores_live`, `atomiclong_live` (instant):
+  - Compare to known application configuration (expected number of CP objects).
+  - Stable = healthy. Unexpected drop = objects were destroyed. Unexpected growth = new objects created.
 - `locks_destroyed`, `semaphores_destroyed`, `atomiclong_destroyed` (instant):
-  - 0 → healthy (CP objects are long-lived by design)
-  - Any non-zero → objects have been destroyed (investigate why)
+  - 0 → healthy (CP objects are long-lived by design; they should never be destroyed in normal operation)
+  - Any non-zero → objects have been destroyed (investigate root cause)
+  - Note: destroyed CP objects are never garbage-collected — their tombstone persists in Raft state
 - `cp_object_churn` (range):
   - Flat line → no destruction (expected)
-  - Rising → objects are being repeatedly created and destroyed (anti-pattern);
+  - Rising → objects being repeatedly created and destroyed (anti-pattern);
     adds Raft overhead and increases log pressure
+
+### CP group topology health
+
+- `total_cp_groups` vs `len(cp_groups)` from Cluster Context:
+  - Equal → expected topology
+  - `total_cp_groups` > `len(cp_groups)` → unknown group created (possible application misconfiguration)
+  - `total_cp_groups` < `len(cp_groups)` → a known group is missing from METADATA (investigate)
+- `group_member_counts` per group: all groups must show `group_size` members
+  - == group_size → healthy
+  - == group_size - 1 → group degraded (one member absent from this group)
+  - == 1 → group has lost quorum; operations on this group will hang
+- `terminated_raft_groups`: must be 0; any non-zero = a CP group has been permanently destroyed
+- `raft_nodes_per_member`: should be approximately equal across members
+  (expected ≈ total_groups × group_size / cp_member_count); large deviation = imbalanced load
+
+### Session management health
+
+- `session_heartbeat_rate` (range):
+  - Non-zero → sessions are alive and heartbeating at expected intervals
+  - Drops to 0 → no active sessions or all clients disconnected / crashed
+  - Sustained low rate with active lock/semaphore usage → session TTL risk
+- `session_expiry_snapshot` (instant — epoch ms per active session):
+  - Compare each value to the analysis end timestamp × 1000 (convert to ms).
+  - Sessions expiring within `session-time-to-live-seconds` × 1000 of the analysis end =
+    imminent expiry risk; if such sessions hold locks (`lock_owner_session` match) or
+    semaphore permits, their release will be unexpected and may unblock waiting clients.
+  - Sessions already expired (expiry time < analysis end time in ms) = orphaned session;
+    any held locks or permits have already been force-released.
+  - Count of sessions near expiry or already expired defines the orphan signal.
+
+### Persistence health
+
+Persistence status is derived from `cp_subsystem_config` in Cluster Context, not from metrics:
+- If `cp_subsystem_config.persistence-enabled == "true"`:
+  - `snapshot_index_over_time`: regular step-ups confirm snapshots are being written to disk.
+  - After a member restart (`member_uptime_ms` low): `snapshotIndex` should retain its pre-crash
+    value (state recovered from disk). If it resets to 0, recovery failed — check logs for
+    `data-load-timeout-seconds` errors.
+  - Status: ✅ if snapshots are progressing; ⚠️ if no snapshots and heavy write load; 🔴 if
+    recovery failed after restart.
+- If `cp_subsystem_config.persistence-enabled == "false"` or config is absent:
+  - CP members cannot recover state after a crash; a restarted member must rejoin as a new CP member.
+  - Monitor `hz_raft_missingMembers` closely — missing-cp-member-auto-removal-seconds governs
+    how long a crashed member blocks fault tolerance.
+  - Status: N/A — note that in-memory mode is the configuration choice and warn if any member
+    has recently restarted.
+
+### Cluster availability health
+
+Derived from `cluster_health` in Cluster Context (Hazelcast REST health check per member).
+For each member in `cluster_health`:
+- `nodeState`:
+  - ACTIVE → node is operational
+  - PASSIVE / SHUT_DOWN → node is not serving requests
+- `clusterState`:
+  - ACTIVE → normal operations
+  - FROZEN / PASSIVE → cluster is in a restricted state (deliberate or incident)
+  - IN_TRANSITION → state change in progress (transient; watch for resolution)
+- `clusterSafe`: false = data migration or partition healing in progress
+- `clusterSize`: compare to `cp_member_count`; mismatch = a member is not in the cluster
+- `error` key present → health endpoint unreachable for that member (member may be down)
+
+Status rules:
+- All members ACTIVE + clusterState ACTIVE + clusterSize == cp_member_count → ✅
+- Any member PASSIVE/SHUT_DOWN or clusterState non-ACTIVE → 🔴
+- clusterSafe false → ⚠️
+- Any member unreachable (error key) → ⚠️ (cross-reference with reporting_members)
+- `cluster_health` absent (fetch failed) → note as unavailable; do not assume healthy
 
 ### Cluster group count
 - Compare `total_cp_groups` against `len(cp_groups)` from Cluster Context.
@@ -426,14 +509,22 @@ Use workload roles only to explain behaviour already supported by metrics.
 One or two sentences stating overall health and the most important observation.
 
 ## Health Status
-| Area | Status | Detail |
+Emit exactly these 11 rows in this order. Use ✅ / ⚠️ / 🔴 for operational rows; ✅ / N/A for Persistence.
+The Detail cell must contain specific observed values — never leave it as "…" or generic text.
+
+| Aspect | Status | Detail |
 |---|---|---|
-| Cluster Membership | ✅ / ⚠️ / 🔴 | … |
-| Raft Consensus | ✅ / ⚠️ / 🔴 | … |
-| Log Health | ✅ / ⚠️ / 🔴 | … |
-| Member Health | ✅ / ⚠️ / 🔴 | heap %, CPU %, restarts |
-| CP Maps | ✅ / ⚠️ / 🔴 | … |
-| Data Structures | ✅ / ⚠️ / 🔴 | semaphore permits, lock activity, counter throughput, session health |
+| Cluster Membership | ✅/⚠️/🔴 | active members / configured (e.g. 5/5); missing member count; reporting_members vs cp_member_count |
+| Raft Consensus | ✅/⚠️/🔴 | elections detected (yes/no + count); terms stable; leadership balanced (yes/no + which member leads most groups if imbalanced) |
+| Log Health | ✅/⚠️/🔴 | min available log capacity across groups; uncommitted entries (max); snapshot lag (max); commitIndex/lastApplied in sync (yes/no) |
+| Member Health | ✅/⚠️/🔴 | heap % range across members; CPU % range; any recent restarts (yes/no + member name if yes) |
+| CP Maps | ✅/⚠️/🔴 | utilisation % per map (e.g. map1 3.3%, map2 5.1%); entry count trend (stable/growing/dropping) |
+| Data Structures | ✅/⚠️/🔴 | semaphore permits (available/initial per semaphore); lock state (idle/held + owner session if held); counter activity (rate or idle) |
+| Session Management | ✅/⚠️/🔴 | sessions heartbeating (yes/no); sessions near expiry count; orphaned sessions count (expired but may have held resources) |
+| CP Group Topology | ✅/⚠️/🔴 | group count (observed/configured); all groups at full group-size (yes/no); destroyed groups count |
+| Object Lifecycle | ✅/⚠️/🔴 | live object counts (locks/semaphores/atomic longs); destroyed counts; churn trend (flat/rising) |
+| Persistence | ✅/N/A | enabled/disabled (from cp_subsystem_config); if enabled: snapshots progressing (yes/no); recovery signal after restarts |
+| Cluster Availability | ✅/⚠️/🔴 | nodeState and clusterState per member (or summary if all identical); clusterSize vs expected; clusterSafe |
 
 ## Findings
 1. **Finding title**:
