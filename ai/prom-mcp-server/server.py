@@ -20,6 +20,7 @@ from mcp.server import Server
 from mcp.server.sse import SseServerTransport
 from mcp.types import TextContent, Tool
 from starlette.applications import Starlette
+from starlette.requests import Request
 from starlette.responses import Response
 from starlette.routing import Mount, Route
 
@@ -185,14 +186,16 @@ async def _list_metrics(prefix: str) -> list[str]:
 sse_transport = SseServerTransport("/messages")
 
 
-async def _sse_asgi(scope, receive, send):
-    async with sse_transport.connect_sse(scope, receive, send) as streams:
+async def handle_sse(request: Request) -> None:
+    async with sse_transport.connect_sse(
+        request.scope, request.receive, request._send
+    ) as streams:
         await app.run(streams[0], streams[1], app.create_initialization_options())
 
 
 starlette_app = Starlette(
     routes=[
-        Mount("/sse", app=_sse_asgi),
+        Route("/sse", endpoint=handle_sse),
         Mount("/messages", app=sse_transport.handle_post_message),
         Route("/health", endpoint=lambda r: Response("ok")),
     ]

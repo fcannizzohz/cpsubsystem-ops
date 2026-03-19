@@ -98,7 +98,7 @@ async def _fetch_cp_subsystem_config(member: str) -> dict:
         async with httpx.AsyncClient(timeout=5.0) as client:
             r = await client.get(url)
             r.raise_for_status()
-        root = ET.fromstring(r.text)
+        root = ET.fromstring(r.content)
         cp_el = root.find("cp-subsystem")
         if cp_el is None:
             return {}

@@ -35,6 +35,7 @@ from mcp.server import Server
 from mcp.server.sse import SseServerTransport
 from mcp.types import TextContent, Tool
 from starlette.applications import Starlette
+from starlette.requests import Request
 from starlette.responses import Response
 from starlette.routing import Mount, Route
 
@@ -244,10 +245,14 @@ def _xml_to_dict(element: ET.Element) -> dict | str | None:
 async def _get_member_config(member: str) -> dict:
     member_addr = member if ":" in member else f"{member}:5701"
     url = f"{MC_URL}/api/clusters/{MC_CLUSTER}/members/{quote(member_addr, safe='')}/memberConfig"
+    print(f"[hz_get_member_config] GET {url}", flush=True)
     async with httpx.AsyncClient(timeout=10.0) as client:
         r = await client.get(url)
-        r.raise_for_status()
-    root = ET.fromstring(r.text)
+    print(f"[hz_get_member_config] status={r.status_code} content-type={r.headers.get('content-type')} body={r.text[:500]!r}", flush=True)
+    r.raise_for_status()
+    # Pass bytes so ET handles the XML encoding declaration correctly;
+    # fromstring(str) raises ParseError when the declaration includes encoding="..."
+    root = ET.fromstring(r.content)
     return {"member": member_addr, "config": _xml_to_dict(root)}
 
 
@@ -463,16 +468,18 @@ def _fmt_ts(ts: float) -> str:
 sse_transport = SseServerTransport("/messages")
 
 
-async def _sse_asgi(scope, receive, send):
-    async with sse_transport.connect_sse(scope, receive, send) as streams:
+async def handle_sse(request: Request) -> None:
+    async with sse_transport.connect_sse(
+        request.scope, request.receive, request._send
+    ) as streams:
         await app.run(streams[0], streams[1], app.create_initialization_options())
 
 
 starlette_app = Starlette(
     routes=[
-        Mount("/sse",     app=_sse_asgi),
+        Route("/sse",      endpoint=handle_sse),
         Mount("/messages", app=sse_transport.handle_post_message),
-        Route("/health",  endpoint=lambda r: Response("ok")),
+        Route("/health",   endpoint=lambda r: Response("ok")),
     ]
 )
 
