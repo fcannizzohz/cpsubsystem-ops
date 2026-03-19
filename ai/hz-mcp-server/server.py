@@ -468,11 +468,19 @@ def _fmt_ts(ts: float) -> str:
 sse_transport = SseServerTransport("/messages")
 
 
-async def handle_sse(request: Request) -> None:
+class _NullResponse:
+    """Returned by handle_sse so Starlette's request_response wrapper has a
+    callable to invoke instead of None, avoiding TypeError on SSE disconnect."""
+    async def __call__(self, *_) -> None:
+        pass
+
+
+async def handle_sse(request: Request) -> _NullResponse:
     async with sse_transport.connect_sse(
         request.scope, request.receive, request._send
     ) as streams:
         await app.run(streams[0], streams[1], app.create_initialization_options())
+    return _NullResponse()
 
 
 starlette_app = Starlette(
