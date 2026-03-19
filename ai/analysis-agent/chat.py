@@ -368,11 +368,16 @@ async def _loop_openai(model, system, messages, mcp_tools, tool_sessions) -> Asy
 # ---------------------------------------------------------------------------
 
 async def _call_mcp_tool(tool_sessions: dict, name: str, args: dict) -> str:
+    print(f"[_call_mcp_tool] tool={name} args={args}", flush=True)
     session = tool_sessions.get(name)
     if session is None:
+        print(f"[_call_mcp_tool] ERROR: no session for tool={name}", flush=True)
         return json.dumps({"error": f"No MCP session found for tool: {name}"})
     try:
         result = await session.call_tool(name, args)
-        return "\n".join(c.text for c in result.content if hasattr(c, "text"))
+        text = "\n".join(c.text for c in result.content if hasattr(c, "text"))
+        print(f"[_call_mcp_tool] tool={name} result_len={len(text)} result[:200]={text[:200]!r}", flush=True)
+        return text
     except Exception as exc:
+        print(f"[_call_mcp_tool] tool={name} exception={exc}", flush=True)
         return json.dumps({"error": str(exc)})

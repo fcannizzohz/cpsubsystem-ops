@@ -14,6 +14,8 @@ Environment:
 
 from __future__ import annotations
 
+import io
+import json
 import os
 import xml.etree.ElementTree as ET
 from urllib.parse import quote
@@ -98,7 +100,8 @@ async def _fetch_cp_subsystem_config(member: str) -> dict:
         async with httpx.AsyncClient(timeout=5.0) as client:
             r = await client.get(url)
             r.raise_for_status()
-        root = ET.fromstring(r.content)
+        xml_str = json.loads(r.text)
+        root = ET.parse(io.BytesIO(xml_str.encode("utf-8"))).getroot()
         cp_el = root.find("cp-subsystem")
         if cp_el is None:
             return {}

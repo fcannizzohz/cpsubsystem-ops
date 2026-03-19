@@ -820,6 +820,12 @@
     const bubble = appendChatMessage('assistant', '', true);
     let rawText = '';
 
+    // Resolve meta from analysis run, or fall back to current UI selections
+    const chatModel   = analysisMeta.model   || document.getElementById('model-select').value;
+    const chatPromUrl = analysisMeta.promUrl || promUrl;
+    const chatStart   = analysisMeta.start   || new Date(document.getElementById('start-input').value).getTime() / 1000;
+    const chatEnd     = analysisMeta.end     || new Date(document.getElementById('end-input').value).getTime()   / 1000;
+
     try {
       const resp = await fetch('/api/chat', {
         method: 'POST',
@@ -827,10 +833,10 @@
         body: JSON.stringify({
           messages:       chatHistory,
           analysis:       analysisText,
-          prometheus_url: analysisMeta.promUrl,
-          start:          analysisMeta.start,
-          end:            analysisMeta.end,
-          model:          analysisMeta.model,
+          prometheus_url: chatPromUrl,
+          start:          chatStart,
+          end:            chatEnd,
+          model:          chatModel,
         }),
       });
 

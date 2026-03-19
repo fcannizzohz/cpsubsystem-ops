@@ -22,6 +22,7 @@ Environment:
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import re
@@ -250,9 +251,11 @@ async def _get_member_config(member: str) -> dict:
         r = await client.get(url)
     print(f"[hz_get_member_config] status={r.status_code} content-type={r.headers.get('content-type')} body={r.text[:500]!r}", flush=True)
     r.raise_for_status()
-    # Pass bytes so ET handles the XML encoding declaration correctly;
-    # fromstring(str) raises ParseError when the declaration includes encoding="..."
-    root = ET.fromstring(r.content)
+    # MC wraps the XML in a JSON string: the response body is `"<hazelcast ...>"`.
+    # json.loads() unwraps it; encode back to bytes so ET handles the XML
+    # encoding declaration (<?xml version='1.0' encoding='UTF-8'?>) correctly.
+    xml_str = json.loads(r.text)
+    root = ET.parse(io.BytesIO(xml_str.encode("utf-8"))).getroot()
     return {"member": member_addr, "config": _xml_to_dict(root)}
 
 
