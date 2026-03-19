@@ -154,6 +154,8 @@ services:
     hostname: mcp-hazelcast
     environment:
       HZ_MEMBERS: "hz1,hz2,hz3,hz4,hz5"
+      MC_URL: "http://management-center:8080"
+      MC_CLUSTER: "dev"
       PORT: "8002"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -172,6 +174,8 @@ services:
       PROMETHEUS_URL: "http://prometheus:9090"
       MCP_SERVER_URL: "http://mcp-prometheus:8001"
       MCP_HZ_URL: "http://mcp-hazelcast:8002"
+      MC_URL: "http://management-center:8080"
+      MC_CLUSTER: "dev"
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     networks:

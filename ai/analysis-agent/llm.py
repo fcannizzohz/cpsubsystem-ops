@@ -44,10 +44,15 @@ A JSON object describing:
 - group size and quorum
 - CP groups
 - workload roles per group
+- `cp_subsystem_config` (optional) — live CP subsystem config fetched from Management Center,
+  including `session-time-to-live-seconds`, `session-heartbeat-interval-seconds`,
+  `missing-cp-member-auto-removal-seconds`, and CPMap `max-size-mb` per map
 
 Rules:
 - ALL topology assumptions MUST come from Cluster Context.
-- Do NOT assume defaults (e.g. number of members, group size).
+- Do NOT assume defaults (e.g. number of members, group size, session TTL).
+- When `cp_subsystem_config` is present, use its values for threshold calculations
+  (e.g. session expiry risk, CPMap capacity). Override any hardcoded defaults.
 - If required context is missing, state this in Analysis Confidence.
 
 ## Metrics Snapshot
@@ -205,7 +210,8 @@ Use `group_size` from Cluster Context.
 
 ### CPMap capacity health
 
-Use `cp_map_max_size_mb` from Cluster Context (default 20 MB per map).
+Use `cp_map_max_size_mb` from Cluster Context, or the per-map `max-size-mb` value from
+`cp_subsystem_config.cp-maps` if present (falls back to 20 MB if neither is set).
 
 - `cp_map_utilization_pct`:
   - < 70 % → healthy

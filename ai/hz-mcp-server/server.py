@@ -15,6 +15,8 @@ mounted read-only into this container.
 
 Environment:
   HZ_MEMBERS   comma-separated container names  default: hz1,hz2,hz3,hz4,hz5
+  MC_URL       Management Center base URL        default: http://management-center:8080
+  MC_CLUSTER   Hazelcast cluster name            default: dev
   PORT         HTTP port                         default: 8002
 """
 
@@ -23,8 +25,11 @@ from __future__ import annotations
 import json
 import os
 import re
+import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
+from urllib.parse import quote
 
+import httpx
 import uvicorn
 from mcp.server import Server
 from mcp.server.sse import SseServerTransport
@@ -34,8 +39,10 @@ from starlette.requests import Request
 from starlette.responses import Response
 from starlette.routing import Mount, Route
 
-PORT    = int(os.environ.get("PORT", "8002"))
-MEMBERS = [m.strip() for m in os.environ.get("HZ_MEMBERS", "hz1,hz2,hz3,hz4,hz5").split(",")]
+PORT       = int(os.environ.get("PORT", "8002"))
+MEMBERS    = [m.strip() for m in os.environ.get("HZ_MEMBERS", "hz1,hz2,hz3,hz4,hz5").split(",")]
+MC_URL     = os.environ.get("MC_URL",     "http://management-center:8080").rstrip("/")
+MC_CLUSTER = os.environ.get("MC_CLUSTER", "dev")
 
 # Hazelcast log4j2 line pattern:  "HH:mm:ss.SSS [thread] LEVEL  logger - message"
 _LEVEL_RE   = re.compile(r"\]\s+(TRACE|DEBUG|INFO|WARN|ERROR|FATAL)\s+")
@@ -110,6 +117,28 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="hz_get_member_config",
+            description=(
+                "Fetch the live Hazelcast configuration for a specific member from "
+                "Management Center and return it as JSON. "
+                "Use this to verify CP subsystem settings: session TTL, "
+                "group size, missing-member auto-removal timeout, CPMap size limits, etc."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "member": {
+                        "type": "string",
+                        "description": (
+                            f"Member to query (e.g. 'hz1' or 'hz1:5701'). "
+                            f"Available: {member_list}"
+                        ),
+                    },
+                },
+                "required": ["member"],
+            },
+        ),
+        Tool(
             name="hz_get_diagnostic_logs",
             description=(
                 "Fetch Hazelcast diagnostic log snippets from the container filesystem. "
@@ -159,6 +188,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 keywords = [k.lower() for k in (arguments.get("keywords") or [])],
                 max_lines= min(int(arguments.get("max_lines") or 100), 300),
             )
+        elif name == "hz_get_member_config":
+            result = await _get_member_config(arguments["member"])
         elif name == "hz_get_diagnostic_logs":
             result = await _get_diagnostic_logs(
                 member   = arguments["member"],
@@ -173,6 +204,52 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         result = {"error": str(exc)}
 
     return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+
+# ---------------------------------------------------------------------------
+# Member config helper
+# ---------------------------------------------------------------------------
+
+def _xml_to_dict(element: ET.Element) -> dict | str | None:
+    """Recursively convert an XML element to a plain Python dict / str."""
+    tag = element.tag.split("}", 1)[1] if "}" in element.tag else element.tag
+    attrib = dict(element.attrib)
+    children = list(element)
+    text = (element.text or "").strip()
+
+    if not children:
+        # Leaf node — return a simple string if no attributes, else a dict
+        if attrib:
+            node = dict(attrib)
+            if text:
+                node["_value"] = text
+            return node
+        return text or None
+
+    child_map: dict = {}
+    for child in children:
+        child_tag = child.tag.split("}", 1)[1] if "}" in child.tag else child.tag
+        child_val = _xml_to_dict(child)
+        if child_tag in child_map:
+            if not isinstance(child_map[child_tag], list):
+                child_map[child_tag] = [child_map[child_tag]]
+            child_map[child_tag].append(child_val)
+        else:
+            child_map[child_tag] = child_val
+
+    if attrib:
+        child_map.update(attrib)
+    return child_map
+
+
+async def _get_member_config(member: str) -> dict:
+    member_addr = member if ":" in member else f"{member}:5701"
+    url = f"{MC_URL}/api/clusters/{MC_CLUSTER}/members/{quote(member_addr, safe='')}/memberConfig"
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        r = await client.get(url)
+        r.raise_for_status()
+    root = ET.fromstring(r.text)
+    return {"member": member_addr, "config": _xml_to_dict(root)}
 
 
 # ---------------------------------------------------------------------------

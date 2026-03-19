@@ -55,6 +55,22 @@ Common Hazelcast CP metric prefixes:
   hz_cp_atomiclong_* — IAtomicLong values
   hz_cp_session_*    — CP session version and expiration time
 
+Key hz_raft_* metric names (use EXACTLY these — do NOT invent names):
+  hz_raft_group_term                    — current Raft term per group/member
+  hz_raft_group_commitIndex             — highest committed log index
+  hz_raft_group_lastApplied             — highest applied log index
+  hz_raft_group_lastLogIndex            — last entry written to the log
+  hz_raft_group_snapshotIndex           — log index at last snapshot (step-ups = snapshots taken)
+  hz_raft_group_availableLogCapacity    — remaining log slots before exhaustion (NOT "log_size")
+  hz_raft_group_memberCount             — members in this Raft group
+  hz_raft_metadata_activeMembers        — active CP members (METADATA group only)
+  hz_raft_missingMembers                — CP members currently unreachable
+  hz_raft_metadata_groups               — total CP groups tracked by METADATA
+  hz_raft_nodes                         — Raft nodes hosted by this member
+
+There is NO hz_raft_log_size or hz_raft_snapshot_count metric — these do not exist.
+Use hz_raft_group_availableLogCapacity for log fullness and hz_raft_group_snapshotIndex for snapshot tracking.
+
 ## Hazelcast log tool guidance (token-efficient workflow)
 When logs may help (e.g. elections, exceptions, timeout errors):
 
