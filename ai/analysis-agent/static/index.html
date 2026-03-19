@@ -230,6 +230,15 @@
     }
 
     /* ── Chat ────────────────────────────────────────────────────────── */
+    #chat-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.65);
+      z-index: 999;
+    }
+    #chat-overlay.visible { display: block; }
+
     #chat-section {
       display: none;
       background: var(--surface);
@@ -238,6 +247,19 @@
       overflow: hidden;
     }
     #chat-section.visible { display: flex; flex-direction: column; }
+
+    #chat-section.maximized {
+      position: fixed;
+      inset: 50px;
+      z-index: 1000;
+      border-radius: var(--radius);
+      display: flex;
+      flex-direction: column;
+    }
+    #chat-section.maximized #chat-messages {
+      flex: 1;
+      max-height: none;
+    }
 
     #chat-header {
       padding: 10px 16px;
@@ -258,6 +280,19 @@
       color: #3fb950;
       border: 1px solid #2a4a2a;
     }
+    #chat-maximize-btn {
+      margin-left: auto;
+      background: transparent;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      padding: 2px;
+      display: flex;
+      align-items: center;
+      border-radius: 4px;
+      transition: color .15s, background .15s;
+    }
+    #chat-maximize-btn:hover { color: var(--text); background: var(--border); }
 
     #chat-messages {
       padding: 14px 16px;
@@ -409,6 +444,7 @@
   </div>
 </header>
 
+<div id="chat-overlay"></div>
 <div id="layout">
 
   <!-- ── Sidebar ──────────────────────────────────────────────────────── -->
@@ -467,6 +503,18 @@
       <div id="chat-header">
         FOLLOW-UP
         <span class="mcp-badge">MCP · Prometheus tools</span>
+        <button id="chat-maximize-btn" title="Maximize chat">
+          <!-- expand icon -->
+          <svg id="icon-expand" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/>
+            <line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/>
+          </svg>
+          <!-- collapse icon, hidden by default -->
+          <svg id="icon-collapse" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none">
+            <polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/>
+            <line x1="10" y1="14" x2="3" y2="21"/><line x1="21" y1="3" x2="14" y2="10"/>
+          </svg>
+        </button>
       </div>
       <div id="chat-messages"></div>
       <div id="chat-input-row">
@@ -842,6 +890,27 @@
   document.getElementById('chat-send').addEventListener('click', sendChatMessage);
   document.getElementById('chat-input').addEventListener('keydown', e => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChatMessage(); }
+  });
+
+  // ── Chat maximize / minimize ──────────────────────────────────────────────
+  let chatMaximized = false;
+
+  function toggleChatMaximize() {
+    chatMaximized = !chatMaximized;
+    document.getElementById('chat-section').classList.toggle('maximized', chatMaximized);
+    document.getElementById('chat-overlay').classList.toggle('visible', chatMaximized);
+    document.getElementById('icon-expand').style.display   = chatMaximized ? 'none'  : '';
+    document.getElementById('icon-collapse').style.display = chatMaximized ? ''      : 'none';
+    document.getElementById('chat-maximize-btn').title     = chatMaximized ? 'Minimize chat' : 'Maximize chat';
+    // Scroll to bottom after resize
+    const msgs = document.getElementById('chat-messages');
+    msgs.scrollTop = msgs.scrollHeight;
+  }
+
+  document.getElementById('chat-maximize-btn').addEventListener('click', toggleChatMaximize);
+  document.getElementById('chat-overlay').addEventListener('click', toggleChatMaximize);
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && chatMaximized) toggleChatMaximize();
   });
 </script>
 </body>
