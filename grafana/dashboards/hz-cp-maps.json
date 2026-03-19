@@ -34,7 +34,10 @@
         "includeAll": false,
         "refresh": 2,
         "hide": 0,
-        "current": {}
+        "current": {
+          "text": "dev",
+          "value": "dev"
+        }
       },
       {
         "name": "cp_group",

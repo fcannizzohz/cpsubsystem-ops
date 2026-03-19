@@ -34,7 +34,10 @@
         "includeAll": false,
         "refresh": 2,
         "hide": 0,
-        "current": {}
+        "current": {
+          "text": "dev",
+          "value": "dev"
+        }
       },
       {
         "name": "cp_group",
@@ -537,7 +540,7 @@
       "id": 11,
       "type": "stat",
       "title": "CP Group Availability",
-      "description": "Per-group membership ratio: active reporters / expected (max seen across groups). 100% = all members present (green). >50% = degraded but quorum holds (orange). ≤50% = below quorum, group unavailable (red). Thresholds are group-size agnostic.",
+      "description": "Per-group membership ratio: active reporters / expected (max seen across groups). 100% = all members present (green). >50% = degraded but quorum holds (orange). \u226450% = below quorum, group unavailable (red). Thresholds are group-size agnostic.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -561,7 +564,9 @@
       ],
       "options": {
         "reduceOptions": {
-          "calcs": ["lastNotNull"]
+          "calcs": [
+            "lastNotNull"
+          ]
         },
         "colorMode": "background",
         "graphMode": "none",
@@ -575,9 +580,18 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "red",    "value": 0    },
-              { "color": "orange", "value": 0.51 },
-              { "color": "green",  "value": 1.0  }
+              {
+                "color": "red",
+                "value": 0
+              },
+              {
+                "color": "orange",
+                "value": 0.51
+              },
+              {
+                "color": "green",
+                "value": 1.0
+              }
             ]
           }
         },

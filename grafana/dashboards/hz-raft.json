@@ -34,7 +34,10 @@
         "includeAll": false,
         "refresh": 2,
         "hide": 0,
-        "current": {}
+        "current": {
+          "text": "dev",
+          "value": "dev"
+        }
       },
       {
         "name": "cp_group",
@@ -569,31 +572,63 @@
       "type": "timeseries",
       "title": "Uncommitted Entries (lastLogIndex \u2212 commitIndex)",
       "description": "Entries written to the leader log but not yet committed by a quorum. Derived from lastLogIndex \u2212 commitIndex. When this approaches 200 (uncommitted-entry-count-to-reject-new-appends), the leader will start rejecting new writes. A sustained non-zero value under load is normal; a value climbing toward 200 with no recovery is critical.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "x": 0, "y": 41, "w": 24, "h": 8 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 41,
+        "w": 24,
+        "h": 8
+      },
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "expr": "hz_raft_group_lastLogIndex{mc_cluster=\"$cluster\", name=~\"$cp_group\"} - hz_raft_group_commitIndex{mc_cluster=\"$cluster\", name=~\"$cp_group\"}",
           "legendFormat": "{{name}} / {{mc_member}}",
           "refId": "A"
         }
       ],
       "options": {
-        "tooltip": { "mode": "multi" },
-        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] }
+        "tooltip": {
+          "mode": "multi"
+        },
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        }
       },
       "fieldConfig": {
         "defaults": {
-          "custom": { "lineWidth": 2, "fillOpacity": 10 },
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10
+          },
           "min": 0,
           "unit": "short",
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 50 },
-              { "color": "red", "value": 150 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 50
+              },
+              {
+                "color": "red",
+                "value": 150
+              }
             ]
           }
         },
@@ -771,39 +806,76 @@
       "type": "row",
       "title": "Follower Catch-up",
       "collapsed": false,
-      "gridPos": { "x": 0, "y": 59, "w": 24, "h": 1 },
+      "gridPos": {
+        "x": 0,
+        "y": 59,
+        "w": 24,
+        "h": 1
+      },
       "panels": []
     },
     {
       "id": 17,
       "type": "timeseries",
       "title": "Follower Catch-up Lag",
-      "description": "Distance between the max commitIndex in the group and each member's lastApplied. Near 0 for the leader and up-to-date followers. Spikes when a follower restarts and replays the log — watch the trend to see how quickly it converges back to 0.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "x": 0, "y": 60, "w": 12, "h": 8 },
+      "description": "Distance between the max commitIndex in the group and each member's lastApplied. Near 0 for the leader and up-to-date followers. Spikes when a follower restarts and replays the log \u2014 watch the trend to see how quickly it converges back to 0.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 60,
+        "w": 12,
+        "h": 8
+      },
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "expr": "max by (name)(hz_raft_group_commitIndex{mc_cluster=\"$cluster\", name=~\"$cp_group\"}) - hz_raft_group_lastApplied{mc_cluster=\"$cluster\", name=~\"$cp_group\"}",
           "legendFormat": "{{name}} / {{mc_member}}",
           "refId": "A"
         }
       ],
       "options": {
-        "tooltip": { "mode": "multi" },
-        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] }
+        "tooltip": {
+          "mode": "multi"
+        },
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        }
       },
       "fieldConfig": {
         "defaults": {
-          "custom": { "lineWidth": 2, "fillOpacity": 6 },
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 6
+          },
           "min": 0,
           "unit": "short",
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 50 },
-              { "color": "red", "value": 500 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 50
+              },
+              {
+                "color": "red",
+                "value": 500
+              }
             ]
           }
         },
@@ -814,24 +886,50 @@
       "id": 18,
       "type": "timeseries",
       "title": "Leader Distribution",
-      "description": "Number of CP groups for which each member is currently the Raft leader. Ideally balanced across members (~1–2 groups each). A member holding 0 groups may indicate it is overloaded or partitioned. A single member holding all groups indicates other members are down.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "x": 12, "y": 60, "w": 12, "h": 8 },
+      "description": "Number of CP groups for which each member is currently the Raft leader. Ideally balanced across members (~1\u20132 groups each). A member holding 0 groups may indicate it is overloaded or partitioned. A single member holding all groups indicates other members are down.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 60,
+        "w": 12,
+        "h": 8
+      },
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "expr": "count by (mc_member)(hz_raft_group_term{mc_cluster=\"$cluster\", role=\"LEADER\"})",
           "legendFormat": "{{mc_member}}",
           "refId": "A"
         }
       ],
       "options": {
-        "tooltip": { "mode": "multi" },
-        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "mean"] }
+        "tooltip": {
+          "mode": "multi"
+        },
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "mean"
+          ]
+        }
       },
       "fieldConfig": {
         "defaults": {
-          "custom": { "lineWidth": 2, "fillOpacity": 10, "stacking": { "mode": "normal" } },
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal"
+            }
+          },
           "min": 0,
           "unit": "short",
           "decimals": 0
